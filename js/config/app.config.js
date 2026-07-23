@@ -37,7 +37,12 @@ export const SESSION = Object.freeze({
    ========================================================================== */
 
 export const SCHEMA = Object.freeze({
-    name: 'natyam_erp',
+    // Distinct from the older Natyam-ERP-UAT deployment's database name. Both
+    // apps can end up served from the same GitHub Pages origin
+    // (username.github.io), and IndexedDB is scoped to the origin, not the
+    // path — sharing a name meant this app silently inherited that one's
+    // already-seeded (password-less) user records instead of seeding its own.
+    name: 'natyam_erp_login_uat',
     version: 6,
 
     stores: {
