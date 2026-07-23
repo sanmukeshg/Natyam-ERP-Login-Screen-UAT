@@ -116,6 +116,7 @@ export default class StaffPage extends Page {
                     `
                 },
                 { key: 'roleLabel', label: 'Role', sortable: true },
+                { key: 'branchNames', label: 'Branch', sortable: true },
                 {
                     key: 'batchCount', label: 'Teaching', align: 'right', sortable: true,
                     render: (row) => row.batchCount
@@ -193,9 +194,10 @@ export default class StaffPage extends Page {
                 options: STAFF_ROLES.map((role) => ({ value: role.value, label: role.label }))
             },
             {
-                name: 'branchId', label: 'Branch', type: 'select', required: true, width: 'half',
-                value: existing?.branchId || session.branch(),
-                options: optionsFrom(branches, { label: (b) => b.name })
+                name: 'branchIds', label: 'Branches', type: 'checkbox-group', required: true,
+                value: existing?.branchIds?.length ? existing.branchIds : [existing?.branchId || session.branch()].filter(Boolean),
+                options: optionsFrom(branches, { label: (b) => b.name }),
+                hint: 'A teacher who works at more than one branch can be selected here.'
             },
             { name: 'specialisation', label: 'Specialisation', width: 'half', value: existing?.specialisation,
               placeholder: 'Nattuvangam, abhinaya' },

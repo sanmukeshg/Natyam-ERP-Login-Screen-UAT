@@ -47,13 +47,19 @@ export default class BatchesPage extends Page {
         super(context);
         this.title = 'Batches';
         this.includeClosed = false;
+        this.loadToken = 0;
     }
 
     async render(container) {
         this.container = container;
         render(container, this.shell());
         this.bind();
-        this.buildTable();
+
+        // A skeleton here, not an empty DataTable, so a slow cold IndexedDB
+        // open (right after reopening the browser) never shows "No batches
+        // yet" for existing data that simply hasn't arrived back from load()
+        // yet. The table itself is built once real rows are in hand.
+        render(this.container.querySelector('[data-role="table"]'), html`<div class="skeleton skeleton-row"></div>`);
         await this.load();
 
         if (this.query.new) this.createBatch();
@@ -102,9 +108,9 @@ export default class BatchesPage extends Page {
             .forEach((event) => this.events.on(event, () => this.load()));
     }
 
-    buildTable() {
+    buildTable(rows = []) {
         this.table = new DataTable({
-            rows: [],
+            rows,
             searchPlaceholder: 'Search batch, teacher or room…',
             defaultSort: 'name',
             emptyTitle: 'No batches yet',
@@ -170,10 +176,17 @@ export default class BatchesPage extends Page {
     }
 
     async load() {
+        // Guards against two overlapping loads (e.g. BATCH_CREATED and
+        // STUDENT_CREATED firing close together) resolving out of order and
+        // the older response overwriting the table with stale rows.
+        const token = ++this.loadToken;
+
         try {
             const rows = await listBatches(session.branch(), { includeClosed: this.includeClosed });
+            if (token !== this.loadToken) return;
+
             this.rows = rows;
-            this.table.setRows(rows);
+            if (!this.table) this.buildTable(rows); else this.table.setRows(rows);
 
             const full = rows.filter((r) => r.capacity && r.enrolled >= r.capacity).length;
             const empty = rows.filter((r) => !r.enrolled).length;
@@ -184,8 +197,10 @@ export default class BatchesPage extends Page {
                 ${empty ? `· ${empty} with nobody in them` : ''}
             `);
         } catch (err) {
+            if (token !== this.loadToken) return;
             console.error(err);
             toast.error(err.message);
+            if (!this.table) this.buildTable([]);
         }
     }
 
@@ -266,9 +281,10 @@ export default class BatchesPage extends Page {
         });
 
         if (created) {
-            toast.success(`${created.name} created.`);
+            const { batch } = created;
+            toast.success(`${batch.name} created.`);
             await this.load();
-            this.openBatch(created.id);
+            this.openBatch(batch.id);
         }
     }
 

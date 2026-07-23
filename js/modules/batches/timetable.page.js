@@ -67,6 +67,10 @@ export default class TimetablePage extends Page {
         this.onDispose(on(this.container, 'click', '[data-action="print"]', () => window.print()));
         this.onDispose(on(this.container, 'click', '[data-batch]', (_e, target) =>
             router.go(`/batches?batch=${target.dataset.batch}`)));
+        this.onDispose(on(this.container, 'click', '[data-register]', (event, target) => {
+            event.stopPropagation();
+            router.go(`/attendance?batch=${target.dataset.register}&date=${target.dataset.date}`);
+        }));
 
         this.events.on(EVENTS.BRANCH_CHANGED, () => this.load());
     }
@@ -135,16 +139,22 @@ export default class TimetablePage extends Page {
                                 <ul class="stack stack-sm">
                                     ${day.sessions.map((entry) => html`
                                         <li>
-                                            <button class="timetable-slot" data-batch="${entry.id}">
-                                                <span class="timetable-time">
-                                                    ${entry.startTime}–${entry.endTime}
-                                                </span>
-                                                <span class="type-strong">${entry.name}</span>
-                                                <span class="type-caption type-muted">
-                                                    ${entry.levelLabel} · ${entry.teacherName}
-                                                    ${entry.room ? `· ${entry.room}` : ''}
-                                                </span>
-                                            </button>
+                                            <div class="timetable-slot" data-tone="${entry.registerMarked ? 'positive' : ''}">
+                                                <button class="timetable-slot-main" data-batch="${entry.id}">
+                                                    <span class="timetable-time">
+                                                        ${entry.startTime}–${entry.endTime}
+                                                    </span>
+                                                    <span class="type-strong">${entry.name}</span>
+                                                    <span class="type-caption type-muted">
+                                                        ${entry.levelLabel} · ${entry.teacherName}
+                                                        ${entry.room ? `· ${entry.room}` : ''}
+                                                    </span>
+                                                </button>
+                                                <button class="btn btn-sm btn-ghost timetable-slot-register"
+                                                        data-register="${entry.id}" data-date="${entry.date}">
+                                                    ${raw(icon('check-square', { size: 13 }))} Take register
+                                                </button>
+                                            </div>
                                         </li>
                                     `)}
                                 </ul>

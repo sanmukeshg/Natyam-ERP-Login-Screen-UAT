@@ -102,7 +102,7 @@ export function wizard({
                     </header>
                     <div data-role="step-banner"></div>
                     <form data-role="step-body" novalidate>
-                        ${Array.isArray(list) ? renderFields(list) : (step.render ? step.render(data) : '')}
+                        ${step.render ? step.render(data) : (Array.isArray(list) ? renderFields(list) : '')}
                     </form>
                 </div>
             </div>

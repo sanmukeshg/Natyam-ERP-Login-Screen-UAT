@@ -325,18 +325,37 @@ class BatchRepository extends Repository {
    STAFF
    ========================================================================== */
 
+/**
+ * A staff member's branch memberships. Staff moved from a single `branchId`
+ * to a `branchIds` array (a teacher can be based at more than one branch) —
+ * this falls back to the legacy scalar field so records saved before that
+ * change keep scoping correctly without a migration.
+ */
+export function branchIdsOf(member) {
+    if (member.branchIds?.length) return member.branchIds;
+    return member.branchId ? [member.branchId] : [];
+}
+
 class StaffRepository extends Repository {
     constructor() {
         super({ store: 'staff', prefix: 'STF', entity: 'Staff member', searchFields: ['name', 'employeeNo', 'role', 'specialisation', 'phone'] });
     }
 
     beforeSave(record) {
+        const branchIds = Array.isArray(record.branchIds)
+            ? [...new Set(record.branchIds.filter(Boolean))]
+            : (record.branchId ? [record.branchId] : []);
+
         return {
             ...record,
             name: String(record.name || '').trim().replace(/\s+/g, ' '),
             phone: normalisePhone(record.phone),
             status: record.status || 'active',
-            monthlySalary: Number(record.monthlySalary) || 0
+            monthlySalary: Number(record.monthlySalary) || 0,
+            branchIds,
+            // Kept in sync as the "home" branch — the existing branchId index
+            // and any code that still reads it scalarly stay correct.
+            branchId: branchIds[0] || null
         };
     }
 
@@ -348,12 +367,12 @@ class StaffRepository extends Repository {
 
     async teachers(branchId = null) {
         const rows = (await this.where('role', 'teacher')).filter((s) => s.status === 'active');
-        return branchId ? rows.filter((s) => s.branchId === branchId) : rows;
+        return branchId ? rows.filter((s) => branchIdsOf(s).includes(branchId)) : rows;
     }
 
     async activeStaff(branchId = null) {
         const rows = (await this.all()).filter((s) => s.status === 'active');
-        return branchId ? rows.filter((s) => s.branchId === branchId) : rows;
+        return branchId ? rows.filter((s) => branchIdsOf(s).includes(branchId)) : rows;
     }
 }
 

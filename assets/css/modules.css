@@ -113,19 +113,36 @@
 }
 
 .timetable-slot {
-    display: block;
-    width: 100%;
-    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
     padding: var(--space-2);
     background: var(--surface-raised);
     border: 1px solid var(--border-subtle);
     border-left: 3px solid var(--accent-border);
     border-radius: var(--radius-sm);
     font-size: var(--text-xs);
-    cursor: pointer;
     transition: box-shadow var(--duration-fast) var(--ease-standard);
 }
 .timetable-slot:hover { box-shadow: var(--shadow-sm); }
+
+/* Green once the register for that session's date has been taken. */
+.timetable-slot[data-tone="positive"] { border-left-color: var(--success-500); background: var(--success-50); }
+
+.timetable-slot-main {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+.timetable-slot-register { align-self: flex-start; }
 
 .timetable-time {
     display: block;
@@ -413,7 +430,9 @@
     position: fixed;
     inset: 0;
     background: var(--surface-scrim);
-    z-index: var(--z-sidebar);
+    /* Below the sidebar's z-index so the open mobile drawer stays on top of
+       the dimming layer instead of getting covered by it. */
+    z-index: calc(var(--z-sidebar) - 1);
     border: 0;
 }
 .scrim[hidden] { display: none; }

@@ -162,7 +162,9 @@ class Router {
 
             // Move focus to the new page region so a keyboard or screen-reader
             // user is not left at the bottom of the previous page's DOM.
-            this.viewport.focus?.();
+            // preventScroll stops focus() from nudging the page after the
+            // scroll reset above has just set it to 0.
+            this.viewport.focus?.({ preventScroll: true });
 
             bus.emit(EVENTS.ROUTE_DONE, { path, query, params: match.params });
         } catch (err) {

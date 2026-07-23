@@ -19,7 +19,7 @@ import { localDate, addDays, monthKey, startOfMonth, lastMonths, formatMonth, da
 import { STUDENT_STATUS } from '../config/app.config.js';
 import {
     students$, batches$, admissions$, invoices$, payments$, programs$,
-    attendance$, staff$, branches$, AttendanceMath, PaymentMath, InvoiceMath
+    attendance$, staff$, branches$, branchIdsOf, AttendanceMath, PaymentMath, InvoiceMath
 } from '../data/repositories.js';
 import { dayBoard, trend as attendanceTrend, missingRegisters } from './attendance.service.js';
 import { collectionSummary } from './fees.service.js';
@@ -413,7 +413,7 @@ export async function branchPanel() {
         name: branch.name,
         code: branch.code,
         students: students.filter((s) => s.branchId === branch.id).length,
-        staff: staffRows.filter((s) => s.branchId === branch.id).length,
+        staff: staffRows.filter((s) => branchIdsOf(s).includes(branch.id)).length,
         collected: collections[index].collected,
         outstanding: collections[index].outstanding
     })).sort((a, b) => b.students - a.students);

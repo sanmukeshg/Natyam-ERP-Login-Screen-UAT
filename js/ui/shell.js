@@ -140,7 +140,7 @@ export class Shell {
         const groups = NAVIGATION
             .map((group) => ({
                 ...group,
-                items: group.items.filter((item) => !item.cap || session.can(item.cap))
+                items: group.items.filter((item) => !item.hidden && (!item.cap || session.can(item.cap)))
             }))
             .filter((group) => group.items.length);
 

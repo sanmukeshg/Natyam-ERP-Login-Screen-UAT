@@ -459,34 +459,21 @@
    RESPONSIVE
    ========================================================================== */
 
-@media (max-width: 1024px) {
-    /* Below a laptop, the sidebar becomes an overlay drawer. Grid collapses to
-       a single column so content gets the full width. */
+@media (max-width: 900px) {
+    /* Below a tablet, the sidebar becomes an overlay drawer — position/
+       transform/data-nav rules live in modules.css, kept at this same 900px
+       breakpoint so the two blocks never disagree on when this applies.
+       Grid collapses to a single column so content gets the full width. */
     .app-shell { grid-template-columns: minmax(0, 1fr); }
 
-    .app-sidebar {
-        position: fixed;
-        inset: 0 auto 0 0;
-        width: var(--sidebar-width);
-        transform: translateX(-100%);
-        transition: transform var(--duration-normal) var(--ease-standard);
-        box-shadow: var(--shadow-xl);
-    }
-    .app-shell[data-sidebar="open"] .app-sidebar { transform: translateX(0); }
+    .app-sidebar { box-shadow: var(--shadow-xl); }
+    .app-shell[data-nav="open"] .app-sidebar { transform: translateX(0); }
     .app-shell[data-sidebar="collapsed"] { grid-template-columns: minmax(0, 1fr); }
     .app-shell[data-sidebar="collapsed"] .app-sidebar { width: var(--sidebar-width); }
     .app-shell[data-sidebar="collapsed"] .brand-text,
     .app-shell[data-sidebar="collapsed"] .nav-item-label,
     .app-shell[data-sidebar="collapsed"] .nav-group-label,
     .app-shell[data-sidebar="collapsed"] .nav-sublist { display: revert; }
-
-    .sidebar-scrim {
-        position: fixed;
-        inset: 0;
-        z-index: calc(var(--z-sidebar) - 1);
-        background: var(--surface-scrim);
-        animation: fade-in var(--duration-fast) var(--ease-entrance);
-    }
 
     .header-nav-toggle { display: grid; }
     .sidebar-footer { display: none; }

@@ -22,7 +22,7 @@ import { toAmount } from '../utils/money.js';
 import { CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
 import {
     settings$, branches$, academicYears$, feePlans$, users$, students$, staff$, batches$, invoices$,
-    programs$, expenses$
+    programs$, expenses$, branchIdsOf
 } from '../data/repositories.js';
 
 /* ==========================================================================
@@ -247,7 +247,7 @@ export async function listBranches({ includeInactive = false } = {}) {
     return rows.map((branch) => ({
         ...branch,
         studentCount: students.filter((s) => s.branchId === branch.id).length,
-        staffCount: staffRows.filter((s) => s.branchId === branch.id).length,
+        staffCount: staffRows.filter((s) => branchIdsOf(s).includes(branch.id)).length,
         batchCount: batchRows.filter((b) => b.branchId === branch.id).length
     }));
 }

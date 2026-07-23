@@ -9,6 +9,72 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.3] — 2026-07-23 — UAT Round 3
+
+Thirteen items from the third manual UAT pass. All are fixes or additive
+changes to existing screens — nothing was redesigned, renamed or removed
+outside what's listed below.
+
+### Added
+- **Staff can belong to more than one branch.** A teacher who works at both
+  Hyderabad and Vizag is now selected onto both from one multi-select field,
+  and the Staff list shows every branch they're based at (e.g. "Hyderabad,
+  Vizag"). Existing single-branch records keep working unchanged — nothing
+  was migrated, the new field is read defensively alongside the old one.
+- **Students and Staff lists show a Branch column**, most useful in the "All
+  branches" view.
+- **Fee Collection supports collecting from several students in one sitting.**
+  Select students with a balance due, "Collect selected," and record each
+  payment with its own editable amount. Every payment still posts as its own
+  independent receipt and audit entry — one student's payment failing (an
+  amount that overshoots their balance, say) never touches the others, and a
+  summary reports what succeeded and what didn't.
+- **Timetable tiles turn green once that session's register has been taken**,
+  and each tile now has its own "Take register" button.
+
+### Changed
+- **Attendance is reached from Timetable, not its own sidebar entry.** The
+  separate "Attendance" link is gone from the left navigation; the `/attendance`
+  route, and everything the module does, is unchanged — it's still reachable
+  from a Timetable tile's "Take register" button or the Batches drawer's, exactly
+  as before.
+- **Print Receipt only appears in the student's Receipts list**, not as a
+  prompt immediately after collecting a payment. Collecting money and printing
+  its receipt are now two separate, deliberate steps.
+
+### Fixed
+- **Saving a new batch no longer shows a spurious error toast.** The service
+  returns `{ batch, conflicts }`; the page was reading the wrapper as the
+  batch itself, so a successful save still flashed "No batch was specified."
+  right after the real success toast.
+- **Batches no longer flash "No batches yet" after reopening the browser.**
+  This was never a data-loss bug — a cold IndexedDB open is slow enough that
+  the list's empty state rendered before the real rows arrived. It now shows
+  a loading placeholder instead, and a stray earlier request can no longer
+  overwrite a newer one's results.
+- **The Admissions Wizard's batch-picker and final review step render their
+  content again.** A step defining both an (empty) field list and custom
+  content had the custom content silently skipped; this affected the wizard's
+  4th step and its final "Confirm" step, which is also where "Submit
+  application" lives — the button itself was never mislabelled, it just sat
+  above a blank panel.
+- **The Dashboard, and every other page, opens at the very top.** Restoring
+  focus after navigation was nudging the scroll position by a few pixels
+  right after it had just been reset to zero.
+- **The mobile navigation drawer works across the whole tablet range.** A
+  superseded responsive rule (from an earlier version of the sidebar) was
+  fighting the current one at a different breakpoint, leaving a dead zone
+  between 901–1024px where the menu button did nothing; and the dimming
+  scrim was stacking on top of the open drawer instead of behind it.
+
+### Verified, not changed
+- The optional Course-of-Study field on Student, and Settings → Curriculum,
+  are working as designed (added in 2.2.0) — confirmed to be the only place
+  curricula are managed, with no duplicate or orphaned screen anywhere else in
+  the app.
+
+---
+
 ## [2.2.2] — 2026-07-22 — Final Stabilization
 
 Resolves every item in the manual UAT report. Money moves to whole rupees, the

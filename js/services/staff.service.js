@@ -15,8 +15,9 @@
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
 import { localDate, monthKey, daysBetween, lastMonths, addDays } from '../utils/date.js';
-import { staff$, batches$, students$, salaries$, attendance$, programs$, AttendanceMath } from '../data/repositories.js';
+import { staff$, batches$, students$, salaries$, attendance$, programs$, branchIdsOf, AttendanceMath } from '../data/repositories.js';
 import { teacherSchedule } from './batches.service.js';
+import { listBranches } from './settings.service.js';
 
 export const STAFF_ROLES = Object.freeze([
     { value: 'teacher',  label: 'Teacher',      teaches: true },
@@ -119,14 +120,17 @@ export async function reactivate(id) {
 /** The staff list with teaching load attached. */
 export async function listStaff(branchId = null, { includeInactive = false } = {}) {
     const rows = includeInactive
-        ? (await staff$.all()).filter((s) => !branchId || s.branchId === branchId)
+        ? (await staff$.all()).filter((s) => !branchId || branchIdsOf(s).includes(branchId))
         : await staff$.activeStaff(branchId);
 
-    const [batches, students] = await Promise.all([batches$.active(), students$.active()]);
+    const [batches, students, branches] = await Promise.all([
+        batches$.active(), students$.active(), listBranches()
+    ]);
     const rosterCount = new Map();
     for (const student of students) {
         if (student.batchId) rosterCount.set(student.batchId, (rosterCount.get(student.batchId) || 0) + 1);
     }
+    const branchName = new Map(branches.map((b) => [b.id, b.name]));
 
     return rows
         .map((member) => {
@@ -134,6 +138,7 @@ export async function listStaff(branchId = null, { includeInactive = false } = {
             return {
                 ...member,
                 roleLabel: STAFF_ROLES.find((r) => r.value === member.role)?.label || member.role,
+                branchNames: branchIdsOf(member).map((id) => branchName.get(id)).filter(Boolean).join(', ') || '—',
                 batchCount: own.length,
                 studentCount: own.reduce((sum, b) => sum + (rosterCount.get(b.id) || 0), 0),
                 weeklySessions: own.reduce((sum, b) => sum + (b.days?.length || 0), 0),
@@ -251,13 +256,19 @@ export async function staffSummary(branchId = null) {
 /* ------------------------------------------------------------------ HELPERS */
 
 function normalise(data) {
+    const branchIds = Array.isArray(data.branchIds)
+        ? [...new Set(data.branchIds.filter(Boolean))]
+        : (data.branchId ? [data.branchId] : []);
+
     return {
         ...data,
         name: String(data.name || '').trim().replace(/\s+/g, ' '),
         email: data.email?.trim().toLowerCase() || null,
         specialisation: data.specialisation?.trim() || null,
         monthlySalary: Math.round(Number(data.monthlySalary) || 0),
-        status: data.status || 'active'
+        status: data.status || 'active',
+        branchIds,
+        branchId: branchIds[0] || null
     };
 }
 
@@ -265,7 +276,7 @@ function assertShape(member) {
     if (!member.name) throw new Error('A staff member needs a name.');
     if (!member.role) throw new Error('Choose a role.');
     if (!STAFF_ROLES.some((r) => r.value === member.role)) throw new Error(`"${member.role}" is not a recognised staff role.`);
-    if (!member.branchId) throw new Error('Choose which branch they are based at.');
+    if (!member.branchIds?.length) throw new Error('Choose which branch or branches they are based at.');
     if (!member.phone) throw new Error('A contact number is required.');
     if (member.monthlySalary < 0) throw new Error('Salary cannot be negative.');
     if (member.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(member.email)) throw new Error('That email address does not look right.');

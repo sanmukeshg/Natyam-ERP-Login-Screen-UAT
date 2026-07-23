@@ -245,6 +245,10 @@ export default class StudentsPage extends Page {
                     sortValue: (row) => LEVELS.findIndex((l) => l.value === row.level)
                 },
                 {
+                    key: 'branchName', label: 'Branch', sortable: true,
+                    render: (row) => row.branchName || html`<span class="type-muted">—</span>`
+                },
+                {
                     key: 'batchName', label: 'Batch', sortable: true,
                     render: (row) => row.batchName
                         ? html`<span>${row.batchName}</span>`

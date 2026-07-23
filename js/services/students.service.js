@@ -24,7 +24,7 @@ import { formatMoney } from '../utils/money.js';
 import { STUDENT_STATUS, LEVELS, INVOICE_STATUS, levelLabel } from '../config/app.config.js';
 import {
     students$, batches$, invoices$, payments$, attendance$, certificates$,
-    documents$, programs$, settings$, curricula$, AttendanceMath
+    documents$, programs$, settings$, curricula$, branches$, AttendanceMath
 } from '../data/repositories.js';
 import { studentFeeSummary, raiseSchedule } from './fees.service.js';
 
@@ -598,9 +598,10 @@ export async function listStudents(branchId = null, {
     filter = null,
     withFees = true
 } = {}) {
-    const [all, batchRows] = await Promise.all([students$.all(), batches$.all()]);
+    const [all, batchRows, branchRows] = await Promise.all([students$.all(), batches$.all(), branches$.all()]);
 
     const batchOf = new Map(batchRows.map((b) => [b.id, b]));
+    const branchName = new Map(branchRows.map((b) => [b.id, b.name]));
 
     let rows = all.filter((s) => (!branchId || s.branchId === branchId));
     if (status && status !== 'all') rows = rows.filter((s) => s.status === status);
@@ -628,6 +629,7 @@ export async function listStudents(branchId = null, {
 
         return {
             ...student,
+            branchName: branchName.get(student.branchId) || null,
             batchName: batch?.name || null,
             batchCode: batch?.code || null,
             levelLabel: levelLabel(student.level),

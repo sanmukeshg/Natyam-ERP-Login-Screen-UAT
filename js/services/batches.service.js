@@ -245,16 +245,27 @@ export async function timetable(branchId = null) {
     const [batches, teachers] = await Promise.all([batches$.active(branchId), staff$.teachers()]);
     const teacherName = new Map(teachers.map((t) => [t.id, t.name]));
 
-    return WEEK.map((day) => ({
+    // Each day column already stands for a real calendar date (this
+    // coming Monday, Tuesday, and so on) — used below to look up whether the
+    // register for that date has been taken, one query for the whole week
+    // rather than one per session.
+    const days = WEEK.map((day) => ({ day, date: nextDateFor(day) }));
+    const sortedDates = days.map((d) => d.date).sort();
+    const marked = await attendance$.between(sortedDates[0], sortedDates[sortedDates.length - 1], branchId);
+    const markedSet = new Set(marked.map((r) => `${r.batchId}|${r.date}`));
+
+    return days.map(({ day, date }) => ({
         day,
-        label: dayName(nextDateFor(day)),
+        label: dayName(date),
         sessions: batches
             .filter((b) => (b.days || []).includes(day))
             .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
             .map((b) => ({
                 ...b,
+                date,
                 teacherName: teacherName.get(b.teacherId) || 'Unassigned',
-                levelLabel: levelLabel(b.level)
+                levelLabel: levelLabel(b.level),
+                registerMarked: markedSet.has(`${b.id}|${date}`)
             }))
     }));
 }

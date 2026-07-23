@@ -32,7 +32,7 @@ import { LEVELS, ATTENDANCE_STATUS, levelLabel } from '../config/app.config.js';
 import {
     students$, batches$, admissions$, invoices$, payments$, expenses$,
     staff$, programs$, certificates$, branches$, attendance$, salaries$,
-    AttendanceMath, PaymentMath
+    AttendanceMath, PaymentMath, branchIdsOf
 } from '../data/repositories.js';
 import { summary as attendanceSummary, teacherCompliance } from './attendance.service.js';
 import { collectionSummary } from './fees.service.js';
@@ -590,7 +590,7 @@ async function buildStaffRoster({ branchId, status }) {
         if (student.batchId) roster.set(student.batchId, (roster.get(student.batchId) || 0) + 1);
     }
 
-    let rows = branchId ? team.filter((s) => s.branchId === branchId) : team;
+    let rows = branchId ? team.filter((s) => branchIdsOf(s).includes(branchId)) : team;
     rows = rows.filter((s) => (status ? s.status === status : s.status !== 'inactive'));
 
     return {

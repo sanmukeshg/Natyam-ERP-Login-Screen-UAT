@@ -142,6 +142,10 @@ export default class FeesPage extends Page {
             emptyMessage: 'Every student in this view has settled their fees.',
             emptyIcon: 'check-circle',
             onRowClick: (row) => this.openStudent(row.id),
+            selectable: canCollect,
+            bulkActions: canCollect ? [
+                { label: 'Collect selected', variant: 'primary', onClick: (ids) => this.bulkCollect(ids) }
+            ] : [],
             columns: [
                 {
                     key: 'name', label: 'Student', sortable: true,
@@ -529,16 +533,98 @@ export default class FeesPage extends Page {
 
         if (!result) return;
 
+        // Printing happens from the Receipts list in the student drawer, not
+        // here — collecting a payment and printing its receipt are kept as
+        // two separate steps so nothing prints without the school choosing to.
         toast.success(`${formatMoney(result.payment.amount)} received — receipt ${result.payment.receiptNo}.`);
         await this.load();
+    }
 
-        const print = await confirm({
-            title: 'Print the receipt?',
-            message: `Receipt ${result.payment.receiptNo} for ${formatMoney(result.payment.amount)}.`,
-            confirmLabel: 'Print receipt',
-            cancelLabel: 'Not now'
+    /** Collects fees from several students in one sitting. Each payment is
+     *  still its own independent recordPayment call — its own receipt number,
+     *  its own audit row — so one student's failure (an amount that overshoots
+     *  their balance, say) never touches the others' payments. */
+    async bulkCollect(ids) {
+        const rows = ids.map((id) => this.rows?.find((row) => row.id === id)).filter(Boolean);
+        if (!rows.length) return;
+
+        const candidates = await Promise.all(rows.map(async (row) => {
+            try {
+                const fees = await studentFeeSummary(row.id);
+                const open = fees.invoices.filter((invoice) => invoice.balance > 0);
+                return open.length ? { student: row, invoice: open[0] } : null;
+            } catch {
+                return null;
+            }
+        }));
+
+        const eligible = candidates.filter(Boolean);
+        const skipped = rows.length - eligible.length;
+        if (!eligible.length) {
+            toast.error('Nothing to collect.', 'None of the selected students have an outstanding invoice.');
+            return;
+        }
+
+        const result = await formOverlay({
+            title: `Collect from ${eligible.length} student${eligible.length === 1 ? '' : 's'}`,
+            variant: 'modal',
+            size: 'wide',
+            submitLabel: `Record ${eligible.length} payment${eligible.length === 1 ? '' : 's'}`,
+            intro: 'Each student is billed and receipted separately — one payment failing does not affect the others.'
+                + (skipped ? ` ${skipped} of the selected students have nothing outstanding and were left out.` : ''),
+            fields: [
+                ...eligible.map(({ student, invoice }) => ({
+                    name: `amount_${student.id}`, label: student.name, type: 'money', width: 'half', required: true,
+                    value: invoice.balance,
+                    hint: `${invoice.number} · up to ${formatMoney(invoice.balance)} outstanding`
+                })),
+                { type: 'divider', label: 'Payment details' },
+                {
+                    name: 'mode', label: 'How', type: 'select', required: true, width: 'half',
+                    options: PAYMENT_MODES.map((mode) => ({ value: mode.value, label: mode.label }))
+                },
+                { name: 'paidOn', label: 'Received on', type: 'date', required: true, width: 'half', value: localDate() },
+                {
+                    name: 'reference', label: 'Reference', width: 'half',
+                    hint: 'Applied to every payment below — edit an individual receipt afterwards if they actually differ.'
+                },
+                { name: 'note', label: 'Note', type: 'textarea', rows: 2 }
+            ],
+            onSubmit: async (values) => {
+                const outcomes = [];
+                for (const { student, invoice } of eligible) {
+                    try {
+                        const { payment } = await recordPayment({
+                            invoiceId: invoice.id,
+                            amount: values[`amount_${student.id}`],
+                            mode: values.mode,
+                            paidOn: values.paidOn,
+                            reference: values.reference,
+                            note: values.note
+                        });
+                        outcomes.push({ student, ok: true, payment });
+                    } catch (err) {
+                        outcomes.push({ student, ok: false, error: err.message });
+                    }
+                }
+                return { outcomes };
+            }
         });
-        if (print) await this.printReceipt(result.payment.id);
+
+        if (!result) return;
+
+        await this.load();
+
+        const succeeded = result.outcomes.filter((o) => o.ok);
+        const failed = result.outcomes.filter((o) => !o.ok);
+
+        if (!failed.length) {
+            toast.success(`${succeeded.length} payment${succeeded.length === 1 ? '' : 's'} collected.`,
+                'Print each receipt from the student’s Receipts list.');
+        } else {
+            toast.warning(`${succeeded.length} of ${result.outcomes.length} collected.`,
+                `Failed — ${failed.map((f) => `${f.student.name}: ${f.error}`).join('; ')}`);
+        }
     }
 
     async waive(invoice) {
