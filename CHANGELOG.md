@@ -9,6 +9,35 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.5] — 2026-07-23 — UAT Round 5
+
+Three confirmed defects fixed after root-cause investigation; Payroll's
+double-posting risk was investigated and confirmed but is deliberately left
+unfixed this round (Payroll is scoped for exclusion from Phase-1, so no
+further engineering effort is going into it here).
+
+### Fixed
+- **Opening an application's detail view no longer throws an error.** The
+  duplicate-application check used at submission time returns a single
+  match-or-nothing, by design. The detail view reused that same function as
+  if it returned a list, which broke as soon as a match was found — and
+  since the check has no way to exclude the application from matching
+  itself, that was true for almost every non-rejected application. A
+  dedicated lookup that returns every other matching application (never
+  including the one being viewed) now backs the detail view; the
+  submission-time check is untouched.
+- **Finance → Expenses → "By category" now shows a real count.** The
+  category totals were always correct; the count next to each one was never
+  actually calculated, only defaulted to zero every time.
+- **A branch selection can no longer point at a branch that no longer
+  exists after restoring a backup.** Restoring a backup with a different set
+  of branches left the previously remembered branch id in place even though
+  it no longer matched anything, which could make other screens look like
+  they were missing data. A restore now drops that memory only when it no
+  longer refers to a real branch; a selection that is still valid survives
+  the restore unchanged. Ordinary startup behaviour (no restore involved) is
+  unchanged.
+
 ## [2.2.4] — 2026-07-23 — UAT Round 4
 
 Four issues found testing the deployed 2.2.3 build, all traced to a specific

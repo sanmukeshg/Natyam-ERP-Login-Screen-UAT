@@ -544,7 +544,7 @@ export async function applicationDetail(id) {
     const application = await admissions$.findOrFail(id);
     const [batches, likeness] = await Promise.all([
         eligibleBatches(application),
-        admissions$.findLikeness ? admissions$.findLikeness(application) : Promise.resolve([])
+        admissions$.findAllLikeness ? admissions$.findAllLikeness(application) : Promise.resolve([])
     ]);
 
     return {
@@ -553,7 +553,7 @@ export async function applicationDetail(id) {
         statusLabel: statusLabel(application.status),
         nextAction: nextActionFor(application.status),
         eligibleBatches: batches,
-        possibleDuplicates: (likeness || []).filter((row) => row.id !== application.id)
+        possibleDuplicates: likeness || []
     };
 }
 

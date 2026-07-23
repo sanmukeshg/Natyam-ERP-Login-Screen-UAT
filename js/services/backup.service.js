@@ -180,6 +180,20 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     await db.importAll(known, { mode: 'replace' });
     await settings$.set('lastRestoreAt', nowISO());
 
+    // A restore can bring in a different set of branches. The previously
+    // selected branch id is meaningless if it no longer exists in the
+    // restored data — left in storage, the next hydrate() would silently
+    // land on an unrelated branch rather than "All branches". A selection
+    // that is still valid after the restore is left untouched.
+    try {
+        const restoredBranchIds = new Set((known.branches || []).map((b) => b.id));
+        const stored = JSON.parse(localStorage.getItem('natyam.session') || '{}');
+        if (stored.activeBranchId && !restoredBranchIds.has(stored.activeBranchId)) {
+            delete stored.activeBranchId;
+            localStorage.setItem('natyam.session', JSON.stringify(stored));
+        }
+    } catch { /* private mode or storage disabled — nothing to clear */ }
+
     const result = { ...summarise(backup), safety };
     bus.emit(EVENTS.BACKUP_RESTORED, result);
     bus.emit(EVENTS.DATA_IMPORTED, result);

@@ -222,6 +222,19 @@ class AdmissionRepository extends Repository {
             a.name.toLowerCase() === String(name || '').trim().toLowerCase()
         ) || null;
     }
+
+    /** Same match as findLikeness, but returns every other application that matches (self excluded) — for display, not a submit-time guard. */
+    async findAllLikeness({ id, name, guardianPhone }) {
+        const phone = normalisePhone(guardianPhone);
+        if (!phone) return [];
+        const rows = await this.all();
+        return rows.filter((a) =>
+            a.id !== id &&
+            a.status !== ADMISSION_STATUS.REJECTED &&
+            a.guardianPhone === phone &&
+            a.name.toLowerCase() === String(name || '').trim().toLowerCase()
+        );
+    }
 }
 
 /* ==========================================================================
@@ -708,9 +721,14 @@ class ExpenseRepository extends Repository {
 
     static byCategory(expenses) {
         const tally = new Map();
-        for (const e of expenses) tally.set(e.category, (tally.get(e.category) || 0) + e.amount);
+        for (const e of expenses) {
+            const row = tally.get(e.category) || { amount: 0, count: 0 };
+            row.amount += e.amount;
+            row.count += 1;
+            tally.set(e.category, row);
+        }
         return [...tally.entries()]
-            .map(([category, amount]) => ({ category, amount }))
+            .map(([category, row]) => ({ category, amount: row.amount, count: row.count }))
             .sort((a, b) => b.amount - a.amount);
     }
 }
