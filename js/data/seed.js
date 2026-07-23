@@ -16,10 +16,18 @@ import { db } from '../core/db.js';
 import { uid, sequenceNumber } from '../utils/id.js';
 import { localDate, addDays, monthKey, academicYearOf, nowISO } from '../utils/date.js';
 import { toAmount } from '../utils/money.js';
+import { hashPassword } from '../utils/crypto.js';
 import {
     STUDENT_STATUS, ADMISSION_STATUS, ATTENDANCE_STATUS,
     INVOICE_STATUS, PAYMENT_STATUS, LEVELS, EXPENSE_CATEGORIES
 } from '../config/app.config.js';
+
+/**
+ * Every seeded account's sign-in password. Documented here rather than
+ * hidden behind a hash so the UAT checklist can state it plainly; real
+ * per-user password setting belongs to a later User Management milestone.
+ */
+export const SEED_PASSWORD = 'Natyam@123';
 
 /* Deterministic PRNG so the demo data is identical on every device — a bug
    reproduced on one machine must reproduce on another. */
@@ -281,11 +289,13 @@ async function seedBranches() {
 }
 
 async function seedUsers(branches) {
+    const { hash, salt } = await hashPassword(SEED_PASSWORD);
+
     const users = [
         { id: uid('USR'), name: 'Acharya Mohan Krishna', role: 'owner', email: 'mohan@natyam.example', branchId: null, status: 'active' },
         { id: uid('USR'), name: 'Lalitha Prasad', role: 'registrar', email: 'lalitha@natyam.example', branchId: branches[0].id, status: 'active' },
         { id: uid('USR'), name: 'Venkat Rao', role: 'accountant', email: 'venkat@natyam.example', branchId: null, status: 'active' }
-    ].map(stamp);
+    ].map((user) => stamp({ ...user, passwordHash: hash, passwordSalt: salt }));
 
     await db.putMany('users', users);
     return users;

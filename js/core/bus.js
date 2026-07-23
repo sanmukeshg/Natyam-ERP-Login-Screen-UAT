@@ -134,6 +134,12 @@ export const EVENTS = Object.freeze({
     NOTIFICATION_ADDED: 'notification:added',
     NOTIFICATION_READ:  'notification:read',
 
+    LOGIN_SUCCEEDED:    'auth:login-succeeded',
+    LOGIN_FAILED:       'auth:login-failed',
+    LOGOUT_COMPLETED:   'auth:logout-completed',
+    SESSION_EXPIRED:    'auth:session-expired',
+    SESSION_EXTENDED:   'auth:session-extended',
+
     NOTIFY:             'notify',
     DATA_IMPORTED:      'data:imported'
 });

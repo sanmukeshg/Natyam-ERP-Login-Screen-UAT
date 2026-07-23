@@ -27,7 +27,8 @@ const ENTITY_LABELS = {
     Student: 'student', Admission: 'application', Attendance: 'attendance',
     Invoice: 'invoice', Payment: 'payment', Expense: 'expense', Salary: 'salary',
     Certificate: 'certificate', Batch: 'batch', Staff: 'staff member',
-    Program: 'programme', Branch: 'branch', Settings: 'settings', FeePlan: 'fee plan'
+    Program: 'programme', Branch: 'branch', Settings: 'settings', FeePlan: 'fee plan',
+    Auth: 'sign-in'
 };
 
 const ACTION_VERBS = {
@@ -74,6 +75,14 @@ export function describe(entry) {
     const detail = entry.detail || {};
 
     switch (`${entry.entity}:${entry.action}`) {
+        case 'Auth:login_succeeded':
+            return `${actor} signed in.`;
+        case 'Auth:login_failed':
+            return detail.email ? `A sign-in attempt failed for ${detail.email}.` : `${actor} failed to sign in.`;
+        case 'Auth:logout_completed':
+            return `${actor} signed out.`;
+        case 'Auth:session_expired':
+            return `${actor}’s session expired from inactivity.`;
         case 'Admission:enrol':
             return `${actor} enrolled an applicant as ${detail.admissionNo || 'a new student'}.`;
         case 'Attendance:mark':

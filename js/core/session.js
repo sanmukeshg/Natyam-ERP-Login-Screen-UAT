@@ -14,8 +14,9 @@
  * and that should be said plainly rather than implied by a lock icon.
  */
 
-import { roleCapabilities, roleLabel as resolveRoleLabel, PREFERENCE_DEFAULTS } from '../config/app.config.js';
+import { roleCapabilities, roleLabel as resolveRoleLabel, PREFERENCE_DEFAULTS, SESSION } from '../config/app.config.js';
 import { bus, EVENTS } from './bus.js';
+import { uid } from '../utils/id.js';
 
 const STORAGE_KEY = 'natyam.session';
 
@@ -38,6 +39,65 @@ class Session {
 
         this._capabilities = new Set(roleCapabilities(user?.role));
         this._persist();
+    }
+
+    /* ----------------------------------------------------- AUTHENTICATION */
+
+    /**
+     * Starts a signed-in session for `user`, persisted alongside the existing
+     * preferences blob. Called by auth.service.js once credentials check out;
+     * it only records that a session exists — hydrating capabilities and the
+     * branch list is still `hydrate()`'s job, called separately once branches
+     * are loaded.
+     */
+    createSession(user) {
+        const now = Date.now();
+        const stored = this._readStored();
+        stored.auth = {
+            token: uid('SES'),
+            userId: user.id,
+            expiresAt: now + SESSION.idleTimeoutMs,
+            lastActivityAt: now
+        };
+        this._write(stored);
+    }
+
+    /** Returns the persisted auth record, or null if absent or expired. */
+    validateSession() {
+        const auth = this._readStored().auth;
+        if (!auth) return null;
+        if (Date.now() > auth.expiresAt) return null;
+        return auth;
+    }
+
+    isAuthenticated() {
+        return this.validateSession() !== null;
+    }
+
+    /**
+     * Renews an active session on genuine user activity: pushes the expiry
+     * forward without changing the token. A no-op once the session has
+     * already expired — activity after that point should not resurrect it.
+     */
+    touch() {
+        const stored = this._readStored();
+        if (!stored.auth) return;
+        const now = Date.now();
+        if (now > stored.auth.expiresAt) return;
+        stored.auth.lastActivityAt = now;
+        stored.auth.expiresAt = now + SESSION.idleTimeoutMs;
+        this._write(stored);
+    }
+
+    /** Ends the session. Preferences (theme, density, …) are left alone. */
+    destroySession() {
+        const stored = this._readStored();
+        stored.auth = null;
+        this._write(stored);
+        this.user = null;
+        this.branches = [];
+        this.activeBranchId = null;
+        this._capabilities = new Set();
     }
 
     /* ------------------------------------------------------------- IDENTITY */

@@ -915,6 +915,14 @@ class UserRepository extends Repository {
     async activeUsers() {
         return (await this.all()).filter((u) => u.status === 'active');
     }
+
+    /** Case-insensitive lookup by email — the login identifier. */
+    async findByEmail(email) {
+        const q = String(email || '').trim().toLowerCase();
+        if (!q) return null;
+        const rows = await this.all({ includeDeleted: true });
+        return rows.find((u) => (u.email || '').toLowerCase() === q) || null;
+    }
 }
 
 /* ==========================================================================

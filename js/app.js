@@ -13,14 +13,17 @@
  *      matrix) into the resolution seam, before the session hydrates, so
  *      capability gating already reflects a customised matrix. A no-op until an
  *      editor writes one.
- *   5. Hydrate the session — who is using this, which branches exist.
- *   6. Mount the shell and router, and show the first screen.
- *   7. *Then* run maintenance: sweeping overdue invoices and recomputing
+ *   5. Check for a valid, unexpired session (js/core/session.js). If one
+ *      exists, hydrate it and continue; otherwise render the login screen
+ *      and wait — nothing past this point runs for a signed-out visitor.
+ *   6. Hydrate the session — who is using this, which branches exist.
+ *   7. Mount the shell and router, and show the first screen.
+ *   8. *Then* run maintenance: sweeping overdue invoices and recomputing
  *      alerts. These are deliberately last and deliberately not awaited by
  *      the render path; the school should see its dashboard immediately, not
  *      wait on a sweep of last term's invoices.
  *
- * Anything that fails during 2–5 is fatal and gets an honest screen with the
+ * Anything that fails during 2–4 is fatal and gets an honest screen with the
  * actual error, because "something went wrong" in an offline app with no
  * telemetry leaves the user with nothing to tell anyone.
  */
@@ -35,9 +38,17 @@ import { commandPalette } from './ui/palette.js';
 import { toast } from './ui/toast.js';
 import { seedIfEmpty } from './data/seed.js';
 import { applyStructuralOverrides } from './services/settings.service.js';
-import { branches$, drafts$, notifications$ } from './data/repositories.js';
+import { branches$, drafts$, notifications$, users$ } from './data/repositories.js';
 import { sweepOverdue, runBillingScheduler } from './services/fees.service.js';
 import { refreshAlerts } from './services/notifications.service.js';
+import { renderLogin } from './modules/auth/login.page.js';
+import { expireSession } from './services/auth.service.js';
+
+// A one-shot flag carried across the reload that follows an idle sign-out,
+// so the login screen can explain why the person is looking at it. Session
+// storage rather than a query string: it must not survive a deliberate
+// close-and-reopen the way the session itself is allowed to.
+const LOGOUT_REASON_KEY = 'natyam.logoutReason';
 
 async function boot() {
     const prefs = session.prefs();
@@ -48,13 +59,58 @@ async function boot() {
         await db.open();
         await seedIfEmpty();
         await applyStructuralOverrides();   // installs any edited curriculum/roles; a no-op until one exists
-        await hydrateSession();
     } catch (err) {
         console.error('Start-up failed', err);
         showFatal(err);
         return;
     }
 
+    const auth = session.validateSession();
+    if (auth) {
+        try {
+            const user = await users$.find(auth.userId);
+            if (user) {
+                await hydrateSession(user);
+                await enterApp();
+                return;
+            }
+        } catch (err) {
+            console.error('Could not restore the signed-in user', err);
+        }
+        // The stored session no longer resolves to a real user — a deleted
+        // account, or a foreign/corrupt localStorage value. Fall through to
+        // a fresh sign-in rather than getting stuck.
+        session.destroySession();
+    }
+
+    showLoginScreen();
+}
+
+/**
+ * Every protected page requires a signed-in session (Milestone 1). The
+ * login screen is rendered standalone, outside the Shell and router — there
+ * is nothing to protect yet, so there is nothing for the router to gate.
+ * The URL hash is left untouched: a direct link opened while signed out
+ * resolves correctly once `enterApp()` mounts the router after login.
+ */
+function showLoginScreen() {
+    document.querySelector('#boot')?.remove();
+
+    renderLogin(document.querySelector('#app'), {
+        onSuccess: async (user) => {
+            await hydrateSession(user);
+            await enterApp();
+        }
+    });
+
+    const reason = sessionStorage.getItem(LOGOUT_REASON_KEY);
+    if (reason) {
+        sessionStorage.removeItem(LOGOUT_REASON_KEY);
+        if (reason === 'idle') toast.info('Signed out', 'You were signed out after a period of inactivity.');
+    }
+}
+
+async function enterApp() {
     const root = document.querySelector('#app');
     const shell = new Shell(root);
     const viewport = shell.mount();
@@ -73,7 +129,38 @@ async function boot() {
         if (key === 'density') applyDensity(value);
     });
 
+    watchIdleSession();
     maintenance();
+}
+
+/**
+ * Idle timeout. Real activity renews the session (`session.touch()`); a
+ * periodic check notices once it has lapsed and ends it. A full reload is
+ * used rather than tearing the Shell down by hand — the same "just reload"
+ * pattern router.js's own fatal/error screens already use — which also
+ * guarantees these listeners and this interval do not outlive the session.
+ */
+function watchIdleSession() {
+    let lastTouch = 0;
+    const markActivity = () => {
+        const now = Date.now();
+        if (now - lastTouch < 15000) return;   // at most one write per ~15s
+        lastTouch = now;
+        session.touch();
+    };
+    ['click', 'keydown', 'mousemove', 'scroll'].forEach((type) =>
+        window.addEventListener(type, markActivity, { passive: true }));
+
+    setInterval(() => {
+        if (!session.isAuthenticated()) signOutAndReload('idle');
+    }, 60000);
+}
+
+/** Ends the session for a reason other than a deliberate logout, then reloads to the login screen. */
+export async function signOutAndReload(reason) {
+    sessionStorage.setItem(LOGOUT_REASON_KEY, reason);
+    await expireSession();
+    location.reload();
 }
 
 function registerRoutes() {
@@ -105,21 +192,16 @@ function registerRoutes() {
     }
 }
 
-async function hydrateSession() {
+/**
+ * @param {object} user  The authenticated user record (see auth.service.js).
+ */
+async function hydrateSession(user) {
     const branches = await branches$.active();
 
-    // There is no login. This is a single-tenant app running on the school's
-    // own machine, and inventing a password screen with no server to verify it
-    // would be security theatre. The "user" is the operating convention that
-    // decides which screens are shown; the device login is the real boundary.
     // session.hydrate remembers the previously selected branch itself, so no
     // branch id is passed here — passing one would override the user's choice
     // on every reload.
-    session.hydrate({
-        user: { id: 'owner', name: 'Principal', role: 'owner' },
-        branches,
-        activeBranchId: null
-    });
+    session.hydrate({ user, branches, activeBranchId: null });
 }
 
 /**

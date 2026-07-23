@@ -21,6 +21,7 @@ import { bus, EVENTS } from './bus.js';
 import { session } from './session.js';
 import { html, render } from '../utils/dom.js';
 import { icon } from '../ui/icons.js';
+import { expireSession } from '../services/auth.service.js';
 
 class Router {
     constructor() {
@@ -88,6 +89,19 @@ class Router {
     }
 
     async resolve() {
+        // A session can lapse while the app sits open in a tab — idle
+        // timeout, or local storage cleared from another tab. The idle
+        // watch in app.js catches that reactively every 60s; this catches
+        // it immediately the moment the person tries to go anywhere.
+        // Reloading is what actually gets them back to the login screen —
+        // see js/app.js's own use of the same pattern.
+        if (!session.isAuthenticated()) {
+            await expireSession();
+            location.reload();
+            return;
+        }
+        session.touch();
+
         const raw = window.location.hash.slice(1) || '/';
         const [path, queryString = ''] = raw.split('?');
         const query = Object.fromEntries(new URLSearchParams(queryString));

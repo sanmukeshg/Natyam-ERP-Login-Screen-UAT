@@ -1,0 +1,6 @@
+# Local, per-machine Claude Code settings — not shared project config.
+.claude/settings.local.json
+
+# Generated UAT backup/test data dumps — large, synthetic, not part of the app.
+UAT_Data_Set_1.json
+UAT_Data_Set_2.json

@@ -15,6 +15,18 @@ export const APP = Object.freeze({
     timezone: 'Asia/Kolkata'
 });
 
+/**
+ * Session & authentication. There is no server to enforce these, so a
+ * password check here gates the UI rather than being a real security
+ * boundary — see js/core/session.js for the fuller note. `idleTimeoutMs`
+ * has no source-of-truth value in the IAM specs; 30 minutes is a sensible
+ * default for a front-desk device and is safe to change in one place.
+ */
+export const SESSION = Object.freeze({
+    idleTimeoutMs: 30 * 60 * 1000,
+    hashIterations: 150000
+});
+
 /* ==========================================================================
    DATABASE SCHEMA
    --------------------------------------------------------------------------

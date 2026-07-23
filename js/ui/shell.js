@@ -30,6 +30,7 @@ import { openPalette } from './palette.js';
 import { unreadCount } from '../services/notifications.service.js';
 import { storageStatus } from '../services/settings.service.js';
 import { backupStatus } from '../services/backup.service.js';
+import { logout } from '../services/auth.service.js';
 
 export class Shell {
     constructor(root) {
@@ -100,6 +101,10 @@ export class Shell {
                             <button class="header-btn" data-action="theme"
                                     aria-label="Switch between light and dark">
                                 ${raw(icon('moon', { size: 18 }))}
+                            </button>
+
+                            <button class="header-btn" data-action="logout" aria-label="Log out">
+                                ${raw(icon('log-out', { size: 18 }))}
                             </button>
 
                             <button class="profile-btn" data-action="profile">
@@ -294,6 +299,11 @@ export class Shell {
             const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
             applyTheme(next);
             session.setPref('theme', next);
+        });
+
+        on(this.root, 'click', '[data-action="logout"]', async () => {
+            await logout();
+            location.reload();
         });
 
         on(this.root, 'change', '[data-role="branch-select"]', (_e, target) => {
