@@ -326,7 +326,12 @@ export default class AdmissionsPage extends Page {
             }),
             step('batch', {
                 description: 'Optional now — a batch is required before enrolment, not before applying.',
-                fields: () => [],
+                // render() (below) draws the actual control once onMount has
+                // fetched the eligible batches, but the wizard's absorb() only
+                // ever reads values through this list — without a descriptor
+                // for it here, a chosen preferred batch is silently dropped
+                // and never reaches `data`, however correctly it renders.
+                fields: () => [{ name: 'preferredBatchId', type: 'select' }],
                 render: (data) => html`
                     <div data-role="batch-slot">
                         <p class="type-muted">Checking which batches have room…</p>

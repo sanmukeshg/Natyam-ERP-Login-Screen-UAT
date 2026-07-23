@@ -446,15 +446,25 @@ export async function teacherCompliance({ from, to, branchId = null }) {
     }).sort((a, b) => (a.compliance ?? 101) - (b.compliance ?? 101));
 }
 
+/**
+ * batchId|date keys that already have a register on file in [from, to] — the
+ * one completion check every screen that asks "is this session done" shares
+ * (the Pending list here, and the Timetable's green status), so that answer
+ * can't drift between them.
+ */
+export async function markedSessions(from, to, branchId = null) {
+    const rows = await attendance$.between(from, to, branchId);
+    return new Set(rows.map((r) => `${r.batchId}|${r.date}`));
+}
+
 /** Registers that were never filled in — the follow-up list. */
 export async function missingRegisters({ days = 14, branchId = null } = {}) {
     const from = addDays(localDate(), -days);
-    const [batches, rows] = await Promise.all([
+    const [batches, done] = await Promise.all([
         batches$.active(branchId),
-        attendance$.between(from, localDate(), branchId)
+        markedSessions(from, localDate(), branchId)
     ]);
 
-    const done = new Set(rows.map((r) => `${r.batchId}|${r.date}`));
     const missing = [];
 
     for (const batch of batches) {

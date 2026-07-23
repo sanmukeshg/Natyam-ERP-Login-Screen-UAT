@@ -14,11 +14,11 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { localDate, dayName, addDays } from '../utils/date.js';
+import { localDate, dayName, addDays, startOfWeek } from '../utils/date.js';
 import { LEVELS, levelLabel } from '../config/app.config.js';
-import { batches$, students$, staff$, attendance$, AttendanceMath } from '../data/repositories.js';
+import { batches$, students$, staff$, attendance$, branches$, AttendanceMath } from '../data/repositories.js';
+import { markedSessions } from './attendance.service.js';
 
-const DAY_CODES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const WEEK = Object.freeze(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 
 /* ==========================================================================
@@ -42,7 +42,15 @@ function sharesDay(a, b) {
  * about them one at a time is three round trips of frustration.
  */
 export async function findConflicts(candidate) {
-    const others = (await batches$.active()).filter((b) => b.id !== candidate.id && b.status === 'active');
+    // Teacher clashes intentionally check every branch, not just the
+    // candidate's own — a teacher assigned to more than one branch (Staff
+    // supports this) still cannot teach two overlapping sessions, wherever
+    // they are. A conflicting batch at another branch is real data, just
+    // outside the currently-viewed branch's list, so its branch is named in
+    // the message rather than the check being narrowed to hide it.
+    const [allActive, branches] = await Promise.all([batches$.active(), branches$.all()]);
+    const others = allActive.filter((b) => b.id !== candidate.id && b.status === 'active');
+    const branchName = new Map(branches.map((b) => [b.id, b.name]));
     const conflicts = [];
 
     for (const other of others) {
@@ -50,9 +58,14 @@ export async function findConflicts(candidate) {
 
         const days = (candidate.days || []).filter((d) => (other.days || []).includes(d));
         const when = `${days.join(', ')} ${other.startTime}–${other.endTime}`;
+        const elsewhere = candidate.branchId && other.branchId && candidate.branchId !== other.branchId
+            ? branchName.get(other.branchId) : null;
 
         if (candidate.teacherId && candidate.teacherId === other.teacherId) {
-            conflicts.push({ type: 'teacher', batch: other, message: `The same teacher already takes ${other.name} on ${when}.` });
+            conflicts.push({
+                type: 'teacher', batch: other,
+                message: `The same teacher already takes ${other.name}${elsewhere ? ` at ${elsewhere}` : ''} on ${when}.`
+            });
         }
         if (candidate.room && candidate.branchId === other.branchId && candidate.room === other.room) {
             conflicts.push({ type: 'room', batch: other, message: `${candidate.room} is occupied by ${other.name} on ${when}.` });
@@ -245,14 +258,16 @@ export async function timetable(branchId = null) {
     const [batches, teachers] = await Promise.all([batches$.active(branchId), staff$.teachers()]);
     const teacherName = new Map(teachers.map((t) => [t.id, t.name]));
 
-    // Each day column already stands for a real calendar date (this
-    // coming Monday, Tuesday, and so on) — used below to look up whether the
-    // register for that date has been taken, one query for the whole week
-    // rather than one per session.
-    const days = WEEK.map((day) => ({ day, date: nextDateFor(day) }));
-    const sortedDates = days.map((d) => d.date).sort();
-    const marked = await attendance$.between(sortedDates[0], sortedDates[sortedDates.length - 1], branchId);
-    const markedSet = new Set(marked.map((r) => `${r.batchId}|${r.date}`));
+    // Each day column stands for a real calendar date within *this* week
+    // (Monday-anchored, matching the Indian school week) — used below to look
+    // up whether the register for that date has been taken. Anchoring to the
+    // current week, rather than the next upcoming occurrence of each weekday,
+    // matters: a day earlier in the week than today must show its own
+    // already-passed date, not next week's, or attendance (which can never be
+    // marked for a future date) could never match it.
+    const weekStart = startOfWeek();
+    const days = WEEK.map((day, i) => ({ day, date: addDays(weekStart, i) }));
+    const markedSet = await markedSessions(days[0].date, days[days.length - 1].date, branchId);
 
     return days.map(({ day, date }) => ({
         day,
@@ -315,14 +330,4 @@ function describeSchedule(batch) {
     if (!batch.days?.length) return 'Not scheduled';
     const days = WEEK.filter((d) => batch.days.includes(d)).join(', ');
     return `${days} · ${batch.startTime}–${batch.endTime}`;
-}
-
-
-
-/** The next calendar date falling on a given day code, for label formatting. */
-function nextDateFor(dayCode) {
-    const target = DAY_CODES.indexOf(dayCode);
-    const d = new Date();
-    while (d.getDay() !== target) d.setDate(d.getDate() + 1);
-    return localDate(d);
 }

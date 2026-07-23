@@ -62,11 +62,15 @@ export function wizard({
 
     function paint() {
         render(body, markup());
-        // The rail scrolls horizontally with its scrollbar hidden, so a later
-        // step could sit off-screen with nothing to indicate it was there.
-        const current = body.querySelector('.step[data-state="current"]');
-        if (current?.scrollIntoView) {
-            current.scrollIntoView({ block: 'nearest', inline: 'center' });
+        // The rail wraps onto more than one row once it has too many steps
+        // for the width available, so this keeps the current step's row
+        // scrolled into view within the drawer body.
+        // Named currentStepEl, not current, so it cannot shadow the current()
+        // step-accessor below — that shadowing bug made every step transition
+        // throw "current is not a function" once onMount was reached.
+        const currentStepEl = body.querySelector('.step[data-state="current"]');
+        if (currentStepEl?.scrollIntoView) {
+            currentStepEl.scrollIntoView({ block: 'nearest', inline: 'center' });
         }
         // The first control of a step gets focus, so a keyboard user is not
         // dropped at the top of the dialog on every "Next".

@@ -1,122 +1,109 @@
-# Release Notes — NATYAM ERP v2.2.3
+# Release Notes — NATYAM ERP v2.2.4
 
-**Release:** UAT Round 3
+**Release:** UAT Round 4
 **Date:** 23 July 2026
-**Baseline:** v2.2.2 (previous build)
-**Type:** Bug fixes + two additive features · no schema change · all records preserved
+**Baseline:** v2.2.3 (previous build, confirmed deployed and tested live)
+**Type:** Bug fixes only · no schema change · all records preserved
 
 ---
 
 ## What changed for the academy
 
-### Staff can now belong to more than one branch
+### Admissions Wizard — the error, the stuck Batch step, and the stuck button were one bug
 
-A teacher who takes classes at both Hyderabad and Vizag is selected onto both
-from one multi-select field, instead of being forced to pick a single "home"
-branch. The Staff list shows every branch someone is based at (e.g.
-"Hyderabad, Vizag"), and the Students list now shows its Branch column too —
-both matter most when viewing "All branches" rather than one at a time.
+All three turned out to share a single cause: a step in the wizard's own code
+was calling the wrong thing by accident, which threw an error every time you
+moved between steps. That one throw is why:
 
-Nothing was migrated. Existing staff records, which only ever had one branch,
-keep working exactly as before.
+- a popup appeared while moving between steps,
+- the Batch step's "Checking which batches have room…" message never
+  finished loading, and
+- the final step kept saying "Continue" instead of "Submit application" —
+  because the code that relabels it never got the chance to run.
 
-### Fee Collection can now take several students' payments at once
+Fixing the one underlying mistake fixes all three. While checking every step
+by hand afterwards (rather than assuming that was the only problem), a
+second, previously-invisible issue turned up: the Batch step's "preferred
+batch" dropdown displayed correctly but the choice was never actually saved —
+now it is. And separately, the row of step numbers at the top (1 through 9)
+could run off the edge of the panel with no way to scroll to the later ones;
+it now wraps onto a second row instead, the same fix already used on phones.
 
-Tick the students who owe money, choose "Collect selected," and record each
-one's payment — with its own editable amount — in a single sitting. Every
-payment is still its own separate transaction with its own receipt number: if
-one amount is wrong and gets rejected, it doesn't touch the payments either
-side of it, and a summary at the end says exactly what went through and what
-didn't.
+### Timetable tiles can now actually turn green
 
-Print Receipt now lives only in the student's Receipts list, reached after a
-payment settles — not as a pop-up the moment a payment is taken. Collecting
-money and printing the receipt for it are two separate, deliberate steps.
+The date used to decide "has this day's register been marked" was being
+computed as "the next time this weekday comes around" — which, for a day
+already passed earlier in the week, pointed at a date still in the future.
+Attendance can never be marked for a date that hasn't happened yet, so the
+tile could never show as done. Each day on the Timetable now shows its date
+within the *current* week, so a Monday that's already gone by is checked
+against itself, not next week's Monday.
 
-### Timetable shows attendance status, and is where registers are taken from
+### The Attendance follow-up list now opens the right day
 
-A class's tile on the Timetable turns green once that day's register has been
-marked, so the state is visible without opening anything. Each tile also has
-its own "Take register" button. The separate "Attendance" entry in the left
-sidebar is gone — attendance is reached from Timetable (or still from the
-Batches screen's own "Take register" button, exactly as before). Nothing
-about how attendance itself works has changed; this only moves how you get
-there.
+Clicking "Mark" on an item in "registers unmarked this week" now opens
+*that* register — before, it always opened today's, which could wrongly say
+the register was already marked (because today's own register may well have
+been).
 
-### Fixes from this round of testing
+### The batch-clash warning names the branch, instead of looking mysterious
 
-| You reported | Root cause | Now |
-|---|---|---|
-| Saving a batch showed an error popup | The success handler read the service's `{ batch, conflicts }` wrapper as if it were the batch record itself, so it tried to open "undefined" right after the real save succeeded | Single success toast with the batch's real name; the batch was actually saving correctly all along |
-| Batches "disappeared" after closing and reopening the browser | Not data loss — a slow cold database open let the list's empty state ("No batches yet") render before the real rows arrived | A loading placeholder shows instead, until the real data is in hand |
-| Step 8 hides in the Admissions form; Submit Application seemed to disappear | A step that defines both an empty field list and its own custom content had that content silently skipped — this actually hit the wizard's batch-picker step and its final "Confirm" step (where Submit Application lives), not literally step 8 | Both steps render their content again; Submit Application was never replaced with Continue — it was just sitting above a blank panel |
-| Dashboard opens scrolled down | Restoring keyboard focus after navigating nudged the page a few pixels right after the scroll position had just been reset | Every page, including Dashboard, now opens at the very top |
-| Left navigation broken on tablets | A leftover CSS rule from an earlier version of the sidebar was fighting the current one at a different screen width, and the dimming overlay was stacking on top of the open menu instead of behind it | The mobile/tablet drawer opens and closes correctly across the full range, with the dimming layer sitting behind it |
-
-### Checked and found already correct
-
-The optional **Course of Study** field on a student's record, and **Settings →
-Curriculum** where courses are managed, were reported as leftover — they
-aren't. They're intentional functionality added in 2.2.0. We checked
-specifically for a second, duplicate place curricula might be managed, and
-found none: Settings → Curriculum is the only one. Nothing here changed.
+If a new batch clashes with a same-teacher class at a *different* branch —
+possible now that a teacher can be based at more than one branch (2.2.3) —
+the warning now says which branch that class is at, rather than naming a
+batch that doesn't appear to exist anywhere. It always was a real, active
+batch; it just wasn't in the branch you were currently viewing. The check
+itself is unchanged — a teacher genuinely can't teach two overlapping classes
+even at different branches, and narrowing the check to hide that would
+reopen exactly the double-booking risk it exists to prevent.
 
 ---
 
 ## For administrators / IT
 
-- **No schema change** and **no migration.** Staff's new multi-branch field is
-  read defensively alongside the old single-branch field — a record saved
-  under the old form and never touched again keeps working, with no upgrade
-  step required.
-- **The `/attendance` route is unchanged** — only its sidebar link was
-  removed. Anyone with a bookmark, or a link from Batches, still reaches it.
-- Every fix above is scoped to the file(s) that owned the bug; no shared
-  component, page, or business rule outside what's described was touched.
+- **No schema change, no migration.**
+- The Attendance follow-up list and the Timetable's green status now share
+  one underlying check for "is this register marked," instead of each
+  computing it separately — so that answer can't quietly drift between the
+  two screens in the future.
+- Every fix is scoped to the file(s) that owned the bug. Nothing was
+  redesigned; no button, screen, or workflow was removed.
 
 ## Quality
 
-This is a static, no-build-step application (see `README.md`) normally
-checked with the scripts in `tools/` and a live click-through in a browser.
-**Neither was possible for this release**: this environment has no Node.js,
-Python, or other runtime installed, so the `tools/*.mjs` checks couldn't run
-and no local server could be started to exercise the app live. What was done
-instead:
+Same constraint as the last release: this environment has no Node.js,
+Python, or other runtime installed, so neither the `tools/*.mjs` checks nor a
+live browser click-through could run here. What was done instead:
 
-- A full manual read-through of every changed file (diffed against the
-  previous commit) checking syntax, import/export correctness, and logic —
-  no circular imports introduced, no unresolved references, no unbalanced
-  braces.
-- Every new code path was traced against the actual call sites it affects
-  (e.g. every place that filtered staff by branch was found by direct search
-  and updated, not assumed).
+- Every one of the 6 screenshots in the UAT document was read directly
+  (including one literal JavaScript error message), and each fix was traced
+  back to the exact line that produced what the screenshot showed, rather
+  than guessed at.
+- A full manual re-read of every changed file for syntax, import correctness,
+  and no newly-introduced circular imports.
+- Every wizard step (all 9) was individually traced against how the wizard
+  reads its values, not just the one step the bug report named — which is
+  how the second, previously-masked Batch-step bug was found.
 
-**This is not a substitute for running the app.** Before this reaches
-students and staff, someone should open it in a browser (`python3 -m http.server 8000`
-from this folder, or any static file server) and step through the Manual UAT
-Checklist below — ideally the same person who filed the original bug report,
-since they'll recognise immediately whether each item is actually fixed.
+**This is not a substitute for running the app.** Please step through the
+Manual UAT Checklist below in a real browser before this goes out —
+especially the Admissions Wizard end to end, since that's the area with the
+most moving parts this round.
 
 ## Manual UAT checklist
 
-- [ ] Staff: add/edit a staff member with 2+ branches ticked; list shows all of them; switch between a single branch and "All branches" and confirm the roster changes correctly.
-- [ ] Students list shows a Branch column; Curriculum field still present and working on the student form.
-- [ ] Create a batch: one success toast with its real name, drawer opens on it, no error popup.
-- [ ] Create a batch, close and reopen the browser, open Batches immediately: loading placeholder, then correct data — nothing missing.
-- [ ] Mark a register for a batch meeting today: that day's Timetable tile turns green; "Take register" button on the tile opens the right batch and date.
-- [ ] Attendance is gone from the left sidebar; reaching it from Timetable and from the Batches drawer both still work; marking/correcting attendance is unchanged.
-- [ ] Dashboard, and every other page, opens at the very top when navigated to.
-- [ ] Admissions: step through all 9 steps; the batch-picker step and the final review step show their content; the last step says "Submit application" and submitting works end to end.
-- [ ] Fee Collection: single "Collect" still works with no print pop-up after; select 3+ students, "Collect selected," submit with one deliberately wrong amount — the others still go through; print each receipt from the student's Receipts list.
-- [ ] On a tablet-width window (roughly 900–1024px) and on a phone width: the hamburger opens/closes the drawer, the dimming layer sits behind the open drawer, not on top of it.
+- [ ] Admissions: step through all 9 steps with no popup appearing between any of them; the Batch step finishes loading and shows real batch options (not stuck on "Checking…"); picking a preferred batch and continuing, then going back, still shows it selected; the final step says "Submit application" and submitting works.
+- [ ] Admissions: on a normal desktop-width window, all 9 step numbers are visible (wrapping onto a second row if needed) — none clipped off the edge.
+- [ ] Timetable: mark a register for a batch meeting earlier this week (not just today) — that day's tile turns green, and stays green after a refresh. A day later in the week that hasn't happened yet stays its normal colour.
+- [ ] Attendance: from "registers unmarked this week," click Mark on an entry from a few days ago — it opens that day's register, not today's, and doesn't say "already marked" unless it actually was.
+- [ ] Batches: create a batch that clashes with a same-teacher batch at a *different* branch (for a teacher assigned to more than one) — the warning names which branch the conflicting batch is at.
+- [ ] Regression check: everything verified in the v2.2.3 checklist (Staff multi-branch, Students/Staff Branch columns, batch save/loading fixes, Fee Collection bulk-select, mobile navigation) still behaves as it did.
 
 ## Known issues
 
-- **Automated checks and live browser testing were not run for this release**
-  (see Quality, above) — carried forward as an action item, not a defect in
-  the code itself.
-- Navigation-QA `/settings` flake — pre-existing, unchanged, last noted in
-  v2.2.2; unrelated to anything in this release.
+- Automated checks and live browser testing were not run for this release
+  (see Quality, above) — an action item, not a defect in the code.
+- Navigation-QA `/settings` flake — pre-existing, unrelated, unchanged.
 
 ## Upgrade
 

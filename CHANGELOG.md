@@ -9,6 +9,57 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.2.4] — 2026-07-23 — UAT Round 4
+
+Four issues found testing the deployed 2.2.3 build, all traced to a specific
+root cause rather than patched where they were seen — two of them turned out
+to each explain more than one reported symptom.
+
+### Fixed
+- **The Admissions Wizard's step transitions no longer throw an error, the
+  Batch step now fully loads, and the final step correctly reads "Submit
+  application."** All three were one bug: a local variable inside the
+  wizard's paint routine was named the same as an outer helper function it
+  needed to call afterwards, so calling it called the wrong thing and threw
+  on every step change. That single throw explains the popup between steps
+  (it surfaced as a toast), the Batch step never finishing its load (the code
+  that fetches available batches never got to run), and the last step's
+  button never relabelling itself (a later step in the same function never
+  ran either). Fixed by renaming the variable — nothing else about the wizard
+  changed. Separately, a second, previously-invisible bug was found and fixed
+  while verifying every step by hand: the Batch step's chosen preferred batch
+  was rendered correctly but never actually saved, because the wizard looked
+  for it in the wrong place. And separately again — the step rail (1 through
+  9) could clip its later steps with no way to scroll to them on a normal
+  desktop width; it now wraps onto more than one row instead, the same fix
+  already used on phones, just no longer limited to them.
+- **Timetable tiles can now actually turn green.** The date behind each day
+  column was computed as "the next time this weekday comes around," which
+  for any day already past this week meant a date still in the future —
+  and attendance can never be marked for a date that hasn't happened yet, so
+  the tile could never reflect it. Each day now shows its date within the
+  current calendar week instead, so a Monday already gone by is shown (and
+  checked) as itself, not pushed into next week.
+- **Marking a register from the Attendance "unmarked this week" list opens
+  the right day.** The list already knew the correct date for each entry; the
+  button just wasn't passing it along, so every entry opened today's
+  register instead of its own — which could show as "already marked" for a
+  day that was never touched.
+- **A batch-clash warning that named batches not in the current list has been
+  clarified, not narrowed.** Investigation found the flagged batches were
+  real, active, and correctly excluded nothing — a teacher assigned to more
+  than one branch (2.2.3) genuinely cannot teach two overlapping classes even
+  at different branches, and the check already looks across all of them. The
+  visible list only shows one branch at a time, which is why the conflicting
+  batch looked hidden. The message now names which branch it's at.
+
+### Changed
+- The two places that separately checked "is this session's register marked"
+  (the Attendance follow-up list and the Timetable) now share one function,
+  so that answer can't drift between them again.
+
+---
+
 ## [2.2.3] — 2026-07-23 — UAT Round 3
 
 Thirteen items from the third manual UAT pass. All are fixes or additive

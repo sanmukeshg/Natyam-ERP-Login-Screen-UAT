@@ -993,9 +993,10 @@ tr:focus-within .row-actions { opacity: 1; }
 
 .progress-meta { display: flex; justify-content: space-between; font-size: var(--text-2xs); color: var(--text-secondary); margin-top: var(--space-1); font-variant-numeric: tabular-nums; }
 
-/* Wizard step indicator */
-.steps { display: flex; align-items: center; gap: var(--space-2); overflow-x: auto; padding-bottom: var(--space-1); scrollbar-width: none; }
-.steps::-webkit-scrollbar { display: none; }
+/* Wizard step indicator. Wraps rather than scrolling behind a hidden
+   scrollbar — a step-count that doesn't fit one row on a normal desktop
+   width used to leave later steps clipped with no visible way to reach them. */
+.steps { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); row-gap: var(--space-2); padding-bottom: var(--space-1); }
 
 .step { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .step-marker {
@@ -1011,7 +1012,11 @@ tr:focus-within .row-actions { opacity: 1; }
     transition: all var(--duration-fast) var(--ease-standard);
 }
 .step-label { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--text-tertiary); white-space: nowrap; }
-.step-line { width: 24px; height: 1px; background: var(--border-default); flex-shrink: 0; }
+/* Hidden rather than shown, now that the rail always wraps (see .steps
+   above) — a line connecting two steps that may land on different rows
+   doesn't read sensibly, the same reasoning the narrow-screen rule used
+   before wrapping applied everywhere. */
+.step-line { display: none; }
 
 .step[data-state="current"] .step-marker { background: var(--accent); border-color: var(--accent); color: var(--neutral-0); }
 .step[data-state="current"] .step-label { color: var(--text-primary); font-weight: var(--weight-semibold); }
@@ -1530,10 +1535,8 @@ kbd, .kbd {
 
 .is-active { background: var(--surface-selected); }
 
-/* Wizard rail: on narrow screens the steps wrap rather than scrolling out of
-   sight behind a hidden scrollbar, so a late step is never unreachable. */
+/* Smaller step labels only need the extra squeeze on narrow screens; the
+   wrap itself (and hiding the connecting line, above) now applies always. */
 @media (max-width: 720px) {
-    .steps { flex-wrap: wrap; row-gap: var(--space-2); overflow-x: visible; }
-    .step-line { display: none; }
     .step-label { font-size: var(--text-2xs); }
 }

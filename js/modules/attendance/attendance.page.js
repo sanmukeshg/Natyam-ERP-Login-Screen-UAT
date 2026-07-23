@@ -94,8 +94,19 @@ export default class AttendancePage extends Page {
         }));
         this.onDispose(on(this.container, 'click', '[data-action="holiday"]', () => this.declareHoliday()));
         this.onDispose(on(this.container, 'click', '[data-action="month"]', () => this.monthView()));
-        this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
-            this.openBatchRegister(target.dataset.openBatch)));
+        this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) => {
+            // The Pending list's entries are for specific past dates, not
+            // whatever date this page currently has open — carry that date
+            // through, or "Mark" opens today's register instead of theirs.
+            // The day board's own per-batch cards don't set data-date, so
+            // they keep opening the currently-viewed date, as before.
+            if (target.dataset.date) {
+                this.date = target.dataset.date;
+                const input = this.container.querySelector('[data-role="date"]');
+                if (input) input.value = this.date;
+            }
+            this.openBatchRegister(target.dataset.openBatch);
+        }));
         this.onDispose(on(this.container, 'click', '[data-action="back"]', () => {
             this.batchId = null;
             this.loadBoard();
@@ -149,7 +160,7 @@ export default class AttendancePage extends Page {
                             <li class="spread">
                                 <span>${entry.batch.name} · ${formatDate(entry.date)}</span>
                                 <button class="btn btn-sm btn-secondary"
-                                        data-open-batch="${entry.batch.id}">Mark</button>
+                                        data-open-batch="${entry.batch.id}" data-date="${entry.date}">Mark</button>
                             </li>
                         `)}
                     </ul>
