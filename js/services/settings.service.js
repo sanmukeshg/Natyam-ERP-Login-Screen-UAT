@@ -495,10 +495,12 @@ export async function updateUser(id, changes) {
     const existing = await users$.findOrFail(id);
     if (changes.role && !roleTable()[changes.role]) throw new Error('Choose a valid role.');
 
-    // The school must not be able to lock itself out of its own owner account.
-    if (existing.role === 'owner' && changes.role && changes.role !== 'owner') {
-        const owners = (await users$.activeUsers()).filter((u) => u.role === 'owner');
-        if (owners.length <= 1) throw new Error('There must always be at least one owner.');
+    // The school must not be able to lock itself out of administration —
+    // Administrator is the sole full-access role in the combined model
+    // (Doc 10 §8), so it is the one role that can never drop to zero.
+    if (existing.role === 'administrator' && changes.role && changes.role !== 'administrator') {
+        const admins = (await users$.activeUsers()).filter((u) => u.role === 'administrator');
+        if (admins.length <= 1) throw new Error('There must always be at least one Administrator.');
     }
 
     return users$.update(id, changes);
@@ -508,9 +510,9 @@ export async function deactivateUser(id) {
     session.require('settings.edit', 'deactivate a user');
 
     const user = await users$.findOrFail(id);
-    if (user.role === 'owner') {
-        const owners = (await users$.activeUsers()).filter((u) => u.role === 'owner');
-        if (owners.length <= 1) throw new Error('The last owner account cannot be deactivated.');
+    if (user.role === 'administrator') {
+        const admins = (await users$.activeUsers()).filter((u) => u.role === 'administrator');
+        if (admins.length <= 1) throw new Error('The last Administrator account cannot be deactivated.');
     }
     if (user.id === session.actorId()) throw new Error('You cannot deactivate the account you are signed in with.');
 

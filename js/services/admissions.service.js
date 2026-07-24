@@ -15,7 +15,7 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db, request } from '../core/db.js';
+import { db } from '../core/db.js';
 import { uid, sequenceNumber } from '../utils/id.js';
 import { localDate, nowISO, academicYearOf, ageFrom } from '../utils/date.js';
 import { ADMISSION_STATUS, STUDENT_STATUS, LEVELS, levelLabel } from '../config/app.config.js';
@@ -338,8 +338,15 @@ export async function enrolApplicant(admissionId, { batchId, feePlanId = null, j
     const at = nowISO();
     const actor = session.actorId();
 
-    const student = {
-        id: uid('STU'),
+    // Persisted through the Students repository (students$.create()) rather
+    // than a hand-rolled write, so this goes wherever `students$` actually
+    // points — IndexedDB before Milestone 3, Firestore since. This does mean
+    // the student record and the application's ENROLLED status can no longer
+    // land in one atomic transaction (they are two different databases now)
+    // — the student is created first, deliberately, so a failure in the step
+    // below leaves an enrolled student with a stale application rather than
+    // an "enrolled" application pointing at a student that doesn't exist.
+    const student = await students$.create({
         admissionNo: sequenceNumber('NAT/ADM', year, seq),
         name: admission.name,
         level: admission.level,
@@ -363,31 +370,30 @@ export async function enrolApplicant(admissionId, { batchId, feePlanId = null, j
         emergencyContact: admission.emergencyContact || admission.guardianPhone || null,
         previousExperience: admission.previousExperience || null,
         photo: admission.photo || null,
-        admissionId: admission.id,
-        searchKey: [admission.name, sequenceNumber('NAT/ADM', year, seq), admission.guardianName, admission.level]
-            .filter(Boolean).join(' ').toLowerCase(),
-        createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor, deletedAt: null
-    };
+        admissionId: admission.id
+    });
 
-    const closedApplication = {
-        ...admission,
+    // Persisted through the Admissions repository (admissions$.update())
+    // rather than a hand-rolled write, for the same reason as the student
+    // write above — this goes wherever `admissions$` actually points,
+    // IndexedDB before Milestone 5, Firestore since. The admission update
+    // and the audit row below are now two sequential calls rather than one
+    // atomic IndexedDB transaction (Firestore and the auditLog store are
+    // two different databases) — the admission is closed first, so a
+    // failure writing the audit row leaves an enrolled application without
+    // an audit entry rather than an application stuck mid-enrolment.
+    const closedApplication = await admissions$.update(admission.id, {
         status: ADMISSION_STATUS.ENROLLED,
         enrolledOn: localDate(),
         enrolledBy: actor,
-        studentId: student.id,
-        updatedAt: at,
-        updatedBy: actor
-    };
+        studentId: student.id
+    });
 
-    await db.unit(['students', 'admissions', 'auditLog'], async (s) => {
-        await request(s.students.put(student));
-        await request(s.admissions.put(closedApplication));
-        await request(s.auditLog.put({
-            id: uid('AUD'), entity: 'Admission', entityId: admission.id, action: 'enrol',
-            detail: { studentId: student.id, admissionNo: student.admissionNo, batchId: batch.id },
-            actorId: actor, actorName: session.actorName(), at
-        }));
-    }, 'admission:enrol');
+    await db.put('auditLog', {
+        id: uid('AUD'), entity: 'Admission', entityId: admission.id, action: 'enrol',
+        detail: { studentId: student.id, admissionNo: student.admissionNo, batchId: batch.id },
+        actorId: actor, actorName: session.actorName(), at
+    });
 
     bus.emit(EVENTS.ADMISSION_ENROLLED, { admission: closedApplication, student });
     bus.emit(EVENTS.STUDENT_CREATED, { student });

@@ -18,7 +18,7 @@ import { db } from '../core/db.js';
 import { APP, SCHEMA, STORE_NAMES, CAPABILITIES } from '../config/app.config.js';
 import { nowISO, localDate, formatDateTime } from '../utils/date.js';
 import { downloadFile } from '../utils/dom.js';
-import { settings$ } from '../data/repositories.js';
+import { settings$, students$, admissions$ } from '../data/repositories.js';
 
 const FILE_KIND = 'natyam-erp-backup';
 
@@ -43,6 +43,16 @@ export async function buildBackup({ note = null } = {}) {
     // out, cleared the database and wrote nothing back.
     const exported = await db.exportAll();
     const data = exported.data;
+
+    // Students (Milestone 3) and Admissions (Milestone 5) moved to Cloud
+    // Firestore — db.exportAll() only sees IndexedDB, which no longer holds
+    // the real records for either. Overwrite those two sections with live
+    // Firestore data so a backup taken today actually reflects today's
+    // students and applications, not a stale or empty local copy. Every
+    // other section is untouched — still IndexedDB.
+    data.students = await students$.all({ includeDeleted: true });
+    data.admissions = await admissions$.all({ includeDeleted: true });
+
     const counts = Object.fromEntries(Object.entries(data).map(([store, rows]) => [store, rows.length]));
 
     return {
@@ -177,7 +187,16 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         );
     }
 
-    await db.importAll(known, { mode: 'replace' });
+    // Students and Admissions moved to Cloud Firestore — restored separately
+    // from every other store. Left inside `known`, db.importAll() would
+    // silently write these sections to their now-orphaned local IndexedDB
+    // stores instead of anywhere the app can actually see them.
+    const { students: studentRows, admissions: admissionRows, ...indexedDbStores } = known;
+
+    await db.importAll(indexedDbStores, { mode: 'replace' });
+    if (studentRows) await students$.replaceAll(studentRows);
+    if (admissionRows) await admissions$.replaceAll(admissionRows);
+
     await settings$.set('lastRestoreAt', nowISO());
 
     // A restore can bring in a different set of branches. The previously

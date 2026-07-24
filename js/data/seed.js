@@ -16,18 +16,14 @@ import { db } from '../core/db.js';
 import { uid, sequenceNumber } from '../utils/id.js';
 import { localDate, addDays, monthKey, academicYearOf, nowISO } from '../utils/date.js';
 import { toAmount } from '../utils/money.js';
-import { hashPassword } from '../utils/crypto.js';
 import {
     STUDENT_STATUS, ADMISSION_STATUS, ATTENDANCE_STATUS,
     INVOICE_STATUS, PAYMENT_STATUS, LEVELS, EXPENSE_CATEGORIES
 } from '../config/app.config.js';
 
-/**
- * Every seeded account's sign-in password. Documented here rather than
- * hidden behind a hash so the UAT checklist can state it plainly; real
- * per-user password setting belongs to a later User Management milestone.
- */
-export const SEED_PASSWORD = 'Natyam@123';
+// Users now live in Firestore, not this IndexedDB seed data — see
+// js/data/users.repository.firestore.js. The first person to sign in with
+// Google bootstraps themself as Administrator; there is nothing to seed here.
 
 /* Deterministic PRNG so the demo data is identical on every device — a bug
    reproduced on one machine must reproduce on another. */
@@ -86,7 +82,6 @@ export async function seedIfEmpty() {
     const migrated = await migrateFromV1();
 
     const branches = await seedBranches();
-    const users = await seedUsers(branches);
     const years = await seedAcademicYears();
     const staff = await seedStaff(branches);
     const plans = await seedFeePlans(years[0]);
@@ -116,8 +111,7 @@ export async function seedIfEmpty() {
             branches: branches.length,
             students: students.length,
             batches: batches.length,
-            staff: staff.length,
-            users: users.length
+            staff: staff.length
         }
     };
 }
@@ -286,19 +280,6 @@ async function seedBranches() {
 
     await db.putMany('branches', branches);
     return branches;
-}
-
-async function seedUsers(branches) {
-    const { hash, salt } = await hashPassword(SEED_PASSWORD);
-
-    const users = [
-        { id: uid('USR'), name: 'Acharya Mohan Krishna', role: 'owner', email: 'mohan@natyam.example', branchId: null, status: 'active' },
-        { id: uid('USR'), name: 'Lalitha Prasad', role: 'registrar', email: 'lalitha@natyam.example', branchId: branches[0].id, status: 'active' },
-        { id: uid('USR'), name: 'Venkat Rao', role: 'accountant', email: 'venkat@natyam.example', branchId: null, status: 'active' }
-    ].map((user) => stamp({ ...user, passwordHash: hash, passwordSalt: salt }));
-
-    await db.putMany('users', users);
-    return users;
 }
 
 async function seedAcademicYears() {

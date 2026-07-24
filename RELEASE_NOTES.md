@@ -1,120 +1,136 @@
-# Release Notes — NATYAM ERP v2.2.5
+# Release Notes — NATYAM ERP v2.5.0
 
-**Release:** UAT Round 5
-**Date:** 23 July 2026
-**Baseline:** v2.2.4 (previous build, confirmed deployed and tested live)
-**Type:** Bug fixes only · no schema change · all records preserved
+**Release:** Admissions Migration to Cloud Firestore
+**Date:** 24 July 2026
+**Baseline:** v2.4.1
+**Type:** Data-layer migration for one module only. Every screen, workflow
+and field you already know stays exactly as it is — only where application
+records live underneath changed. Every other module (Attendance, Fees,
+Finance, Batches, Reports, Dashboard) is untouched, still on this browser's
+local database.
 
 ---
 
 ## What changed for the academy
 
-### Admissions — opening an application no longer errors out
+### Applications now live in the cloud, not just this browser
 
-Every application detail view runs a check for possible duplicate
-applications. The check itself (used when someone submits a new application)
-is designed to answer "is there already one of these?" with a single
-yes-or-no — but the detail view was using that same answer as if it were a
-list of every possible duplicate, which broke the moment there was any match
-at all. Because the check had no way to tell an application apart from
-itself, that was true almost every time. Opening an application now uses a
-dedicated check built to return a list — every *other* matching application,
-never the one currently open — so the detail view opens cleanly and the
-"possible duplicate" note only appears when there's a genuine second
-application to look at. The original submission-time check is untouched.
+Until now, every admission application lived only in the local database of
+whichever browser created it. That's now moved to Cloud Firestore — the
+same cloud service Sign-In and Students already use — so application
+records are no longer tied to one device. Nothing about how you take an
+application, review it, approve it, or enrol it has changed; only where
+the record is actually stored.
 
-### Finance — Expenses "By category" now shows how many, not just how much
+### Application numbers are unchanged
 
-The amount next to each expense category was always correct; the count
-beside it was never actually being counted, only ever showing zero. It now
-reflects the real number of expenses in each category.
+Every application still gets the same `NAT/APP/26/0007`-style application
+number, generated exactly the same way as before. Nothing about this
+numbering changed.
 
-### A restored backup can no longer leave the branch selector pointing at nothing
+### Existing applications don't have to be typed back in
 
-Restoring a backup that has a different set of branches used to leave the
-previously-selected branch id sitting in the browser's memory even after it
-no longer matched anything real — which could make other screens (Batches,
-Students, and others) look like they'd lost data, when they were really just
-filtered to a branch that no longer existed. A restore now clears that
-memory *only* when it no longer points at a real branch; a selection that's
-still valid after the restore is left exactly as it was. Ordinary startup —
-no restore involved — behaves exactly as before.
+Cloud Firestore starts empty — it isn't a copy of whatever applications
+already existed locally. A one-time migration tool now exists to carry
+real, existing application records across instead of re-entering them by
+hand. It's deliberately not part of the normal app — no button, no menu —
+it's run once, by hand, from the browser DevTools console on the device
+that holds the real data. See `docs/migrations/ADMISSIONS_DATA_MIGRATION.md`
+for exactly how, including a safe "preview first, write nothing" mode.
 
-### Investigated, confirmed, and deliberately left alone this round
+### One thing that quietly wrote around the system is now fixed
 
-- **Payroll can double-count a staff member's salary** if a manual ledger
-  entry is posted for "Salaries" before a real payroll run for the same
-  staff and month — the two are never cross-checked. This is a real
-  data-integrity defect, but Payroll is scoped for exclusion from Phase-1, so
-  no further engineering time is going into it in this patch. Left
-  completely unchanged.
-- The Attendance "doesn't normally meet on this day" notice, the duplicate
-  Search control in the sidebar and header, Academic Year edit/delete, and a
-  Version/Build-Info screen were all raised this round and are genuine,
-  reasonable requests — none are defects, so none were touched here. They're
-  tracked for a future minor release.
-- "Expenses seem to disappear until refreshed" could not be reproduced as a
-  data-loss defect after a full trace of the Expenses screen's rendering
-  path. The only related behaviour found was a harmless double-repaint
-  (recording an expense fires two events, so the screen redraws twice in
-  quick succession) — left as is pending sharper reproduction steps.
+Enrolling an approved application used to close it out in a way that
+skipped some of the app's own bookkeeping. It never caused a visible
+problem — but it needed a real fix as part of this move, since otherwise
+it would have kept writing to the *old*, now-disconnected local storage
+instead of the application records everyone can actually see. It's fixed;
+it didn't change what it does, only how it saves it.
 
 ---
 
 ## For administrators / IT
 
-- **No schema change, no migration.**
-- Every fix is scoped to the file(s) that owned the bug. Nothing was
-  redesigned; no button, screen, or workflow was removed.
-- Payroll's ledger-posting behaviour is unchanged in this release — see
-  above.
+- **`firestore.rules` must be republished** before this release works —
+  it now also covers the `admissions` collection. Firebase Console →
+  Firestore Database → Rules → paste the current file → Publish.
+- **No other module changed.** Attendance, Fees, Finance, Batches,
+  Timetable, Reports, Dashboard all continue to read and write this
+  browser's local database exactly as before.
+- **No data migrated automatically.** Cloud Firestore's admissions
+  collection starts empty on its own — this release does not copy
+  anything by itself. If real application records exist locally from
+  before this release, run the one-time migration utility
+  (`docs/migrations/ADMISSIONS_DATA_MIGRATION.md`) from the device that
+  holds them, rather than re-entering them by hand.
+- **If you're also migrating Students' historical data**, run the
+  Students migration first — a handful of enrolled applications carry a
+  reference to the student they became, which is only meaningful once
+  that student already exists in Firestore. Nothing in the app currently
+  reads that reference back, so this only matters if you're relying on
+  it for your own records.
+- **A trade-off worth knowing about:** enrolling an application used to
+  involve a database write that could partially fail in a specific,
+  narrow way (the same trade-off already disclosed in the v2.4.0 release
+  notes for Students). That hasn't gotten better or worse in this
+  release — see `docs/migrations/ADMISSIONS_MODULE_MIGRATION.md` for the
+  specifics.
 
 ## Quality
 
-Unlike the previous two rounds, a live verification pass *was* possible this
-time: the working copy was served locally and driven with a real browser
-session against the actual application code (not a simulation).
+- Static analysis clean: no import cycles, all imports resolve, no
+  undefined identifiers.
+- Every existing caller of the Admissions repository (`admissions.
+  service.js`, and the reports/dashboard/analytics/notifications/search
+  screens that read from it) confirmed unchanged — the repository swap
+  underneath is invisible to all of them, apart from the one repository-
+  bypass fix described above.
+- Login and the rest of the app still load with no console errors.
 
-- Admissions: opened a non-rejected application's detail view directly — no
-  console error, drawer renders correctly.
-- Finance: recorded expenses now show correct per-category counts (Rent: 1,
-  Musicians: 2) matching the underlying entries.
-- Backup/Restore: called the real `restore()` service function twice against
-  the actual UAT demo dataset — once from a branch id absent in the restored
-  data (confirmed cleared), once from a branch id present in the restored
-  data (confirmed preserved).
-- Regression sweep with the fixes applied: Dashboard, Admissions, Students,
-  Timetable, Finance (Position, Ledger, Expenses, Payroll) and Settings all
-  loaded and rendered correctly with zero console errors throughout.
+**Not verifiable from this environment:** actually submitting, reviewing,
+approving, rejecting, reopening, or enrolling a real application against
+Firestore requires being signed in with a real Google account in a real
+browser — this automated environment can load and inspect the code, but
+cannot complete that sign-in. The manual checklist below is what's
+actually unverified and needs a real pass.
 
 ## Manual UAT checklist
 
-- [ ] Admissions: open several applications in different stages (awaiting
-      review, under review, approved, rejected) — the detail drawer opens
-      with no error for every one.
-- [ ] Admissions: create two applications with the same applicant name and
-      guardian phone — opening either one's detail view shows the other as a
-      possible duplicate; opening an application with no real duplicate
-      shows none.
-- [ ] Finance → Expenses → By category: the Count column matches the actual
-      number of expenses in each category; Amount totals are unchanged from
-      before this release.
-- [ ] Settings → Data → Restore a backup with a different branch set than
-      currently selected, then reload — the branch selector no longer
-      silently points at a branch that isn't in the restored data.
-- [ ] Settings → Data → Restore a backup that still contains the currently
-      selected branch — the selection is preserved, not reset.
-- [ ] Payroll: prepare and pay a period as before — behaviour is unchanged.
-- [ ] Regression check: everything verified in the v2.2.4 checklist
-      (Admissions Wizard, Timetable green status, Attendance follow-up list,
-      cross-branch clash message) still behaves as it did.
+- [ ] Publish the current `firestore.rules` (now including `admissions`)
+      before testing anything else below.
+- [ ] If real local admission data exists, run the migration utility's
+      dry run (`docs/migrations/ADMISSIONS_DATA_MIGRATION.md`) and confirm
+      the report's numbers look right before running it for real.
+- [ ] Submit a new application through the wizard — gets an
+      `applicationNo`, appears in the pipeline as "Awaiting review".
+- [ ] Begin review, approve it, then enrol it into a batch — a student is
+      created, the application shows as "Enrolled", both are correct.
+- [ ] Reject an application, then reopen it — both work.
+- [ ] Submit a second application with the same name and guardian phone as
+      an existing one — the duplicate warning appears.
+- [ ] Filter the applications list by branch and by stage — each filters
+      correctly.
+- [ ] As a Viewer-role account, confirm you can see the applications list
+      but cannot submit, approve, or enrol.
+- [ ] As an Owner & Accountant account, confirm you can approve/reject/
+      reopen but cannot submit a new application (no `admission.edit`).
+- [ ] Confirm the Dashboard's admissions panel, Reports' admissions
+      breakdown, and global Search still show application data correctly.
+- [ ] Confirm every other module (Students, Attendance, Fees, Batches)
+      still loads and behaves exactly as before.
 
 ## Known issues
 
-- Payroll's manual-entry vs. payroll-run double-posting risk (see above) is
-  confirmed and understood but intentionally not fixed this round.
-- Navigation-QA `/settings` flake — pre-existing, unrelated, unchanged.
+- No data migration: any real application data entered before this
+  release stays in the old local-only storage and will not appear after
+  upgrading (see "For administrators / IT" above).
+- The atomicity trade-off for `enrolApplicant()` described above —
+  accepted, not hidden, documented in full in
+  `docs/migrations/ADMISSIONS_MODULE_MIGRATION.md` §9.
 
 ## Upgrade
 
-Replace the application files. No data steps are required.
+Replace the application files, **and publish the updated `firestore.rules`**
+— this release does not work without it. No IndexedDB migration is
+required for any other module; only the Admissions screen's data source
+changes.

@@ -6,49 +6,56 @@
  *   1. Paint the theme before anything else. Reading the preference from
  *      localStorage is synchronous, so the first frame is already correct;
  *      waiting for IndexedDB here produces a white flash then a dark app.
- *   2. Open the database and run migrations.
- *   3. Seed if empty, so a fresh install is a working school rather than a
- *      set of empty tables with no way in.
- *   4. Apply any school-defined structural overrides (curriculum ladder, role
- *      matrix) into the resolution seam, before the session hydrates, so
- *      capability gating already reflects a customised matrix. A no-op until an
- *      editor writes one.
- *   5. Check for a valid, unexpired session (js/core/session.js). If one
- *      exists, hydrate it and continue; otherwise render the login screen
- *      and wait — nothing past this point runs for a signed-out visitor.
- *   6. Hydrate the session — who is using this, which branches exist.
- *   7. Mount the shell and router, and show the first screen.
- *   8. *Then* run maintenance: sweeping overdue invoices and recomputing
- *      alerts. These are deliberately last and deliberately not awaited by
- *      the render path; the school should see its dashboard immediately, not
- *      wait on a sweep of last term's invoices.
+ *   2. Open the (still-IndexedDB) database and run migrations, seed if
+ *      empty, apply structural overrides — every module except Auth and
+ *      Users is on IndexedDB in this phase.
+ *   3. Subscribe once to Firebase's onAuthStateChanged. Its callback,
+ *      handleAuthStateChange(), is the single place that decides what a
+ *      signed-in (or signed-out) Firebase user means for this app — it
+ *      runs identically whether the user just restored an existing session
+ *      on reload or just finished a fresh Google sign-in, so there is
+ *      exactly one path instead of two that could drift apart.
+ *   4. Once a Firebase user is both authenticated *and* provisioned
+ *      (resolveProvisionedUser, in auth.service.js), hydrate the session
+ *      and mount the Shell and router.
+ *   5. *Then* run maintenance: sweeping overdue invoices and recomputing
+ *      alerts. Deliberately last and not awaited by the render path — the
+ *      school should see its dashboard immediately, not wait on a sweep of
+ *      last term's invoices.
  *
- * Anything that fails during 2–4 is fatal and gets an honest screen with the
- * actual error, because "something went wrong" in an offline app with no
- * telemetry leaves the user with nothing to tell anyone.
+ * Anything that fails while opening the local database is fatal and gets an
+ * honest screen with the actual error, because "something went wrong" in an
+ * app with no telemetry leaves the user with nothing to tell anyone.
  */
 
 import { db } from './core/db.js';
 import { session } from './core/session.js';
 import { router } from './core/router.js';
 import { bus, EVENTS } from './core/bus.js';
-import { ROUTES } from './config/app.config.js';
+import { ROUTES, SESSION } from './config/app.config.js';
 import { Shell, applyTheme, applyDensity } from './ui/shell.js';
 import { commandPalette } from './ui/palette.js';
 import { toast } from './ui/toast.js';
 import { seedIfEmpty } from './data/seed.js';
 import { applyStructuralOverrides } from './services/settings.service.js';
-import { branches$, drafts$, notifications$, users$ } from './data/repositories.js';
+import { branches$, drafts$, notifications$ } from './data/repositories.js';
 import { sweepOverdue, runBillingScheduler } from './services/fees.service.js';
 import { refreshAlerts } from './services/notifications.service.js';
 import { renderLogin } from './modules/auth/login.page.js';
-import { expireSession } from './services/auth.service.js';
+import { watchAuthState } from './core/firebase.js';
+import { resolveProvisionedUser, expireSession, acknowledgeRemoteSignOut } from './services/auth.service.js';
 
 // A one-shot flag carried across the reload that follows an idle sign-out,
 // so the login screen can explain why the person is looking at it. Session
 // storage rather than a query string: it must not survive a deliberate
-// close-and-reopen the way the session itself is allowed to.
+// close-and-reopen the way Firebase's own session is allowed to.
 const LOGOUT_REASON_KEY = 'natyam.logoutReason';
+
+/** Set once the Shell/router/idle-timer are actually running — see handleAuthStateChange(). */
+let appEntered = false;
+
+/** A provisioning rejection's message, threaded through to the next showLoginScreen() call. */
+let pendingLoginMessage = null;
 
 async function boot() {
     const prefs = session.prefs();
@@ -65,43 +72,61 @@ async function boot() {
         return;
     }
 
-    const auth = session.validateSession();
-    if (auth) {
-        try {
-            const user = await users$.find(auth.userId);
-            if (user) {
-                await hydrateSession(user);
-                await enterApp();
-                return;
-            }
-        } catch (err) {
-            console.error('Could not restore the signed-in user', err);
-        }
-        // The stored session no longer resolves to a real user — a deleted
-        // account, or a foreign/corrupt localStorage value. Fall through to
-        // a fresh sign-in rather than getting stuck.
-        session.destroySession();
-    }
-
-    showLoginScreen();
+    watchAuthState(handleAuthStateChange);
 }
 
 /**
- * Every protected page requires a signed-in session (Milestone 1). The
- * login screen is rendered standalone, outside the Shell and router — there
- * is nothing to protect yet, so there is nothing for the router to gate.
- * The URL hash is left untouched: a direct link opened while signed out
- * resolves correctly once `enterApp()` mounts the router after login.
+ * Fires once at boot (with any Firebase session restored from a previous
+ * visit, or null) and again on every sign-in and sign-out after that.
+ */
+async function handleAuthStateChange(firebaseUser) {
+    if (!firebaseUser) {
+        if (appEntered) {
+            // Another tab signed out (or this one hit an idle timeout that
+            // already ran expireSession() itself) — either way, Firebase now
+            // reports signed-out here too. If it was a different tab, this
+            // tab's own Firestore session record (tracked only in its own
+            // sessionStorage) was never told to close; best-effort close it
+            // before the reload that's about to tear everything else down.
+            acknowledgeRemoteSignOut().catch(() => {});
+
+            // The Shell, router and idle-timer are already running — a
+            // reload is what actually tears all of that down cleanly, the
+            // same "just reload" pattern router.js's own fatal/error views
+            // already use, rather than hand-rolled teardown here.
+            location.reload();
+            return;
+        }
+        session.destroySession();
+        showLoginScreen();
+        return;
+    }
+
+    try {
+        const user = await resolveProvisionedUser(firebaseUser);
+        await hydrateSession(user);
+        appEntered = true;
+        await enterApp();
+    } catch (err) {
+        // Not provisioned, inactive, or archived. Sign the Firebase user
+        // back out — that re-fires this function with null, which shows
+        // the login screen again; this is what it reads to explain why.
+        pendingLoginMessage = err.message;
+        await expireSession().catch(() => {});
+    }
+}
+
+/**
+ * Every protected page requires a signed-in, provisioned user (Milestone 1
+ * + Phase A). Rendered standalone, outside the Shell and router — there is
+ * nothing to protect yet, so there is nothing for the router to gate.
  */
 function showLoginScreen() {
     document.querySelector('#boot')?.remove();
 
-    renderLogin(document.querySelector('#app'), {
-        onSuccess: async (user) => {
-            await hydrateSession(user);
-            await enterApp();
-        }
-    });
+    const message = pendingLoginMessage;
+    pendingLoginMessage = null;
+    renderLogin(document.querySelector('#app'), { initialError: message });
 
     const reason = sessionStorage.getItem(LOGOUT_REASON_KEY);
     if (reason) {
@@ -135,10 +160,8 @@ async function enterApp() {
 
 /**
  * Idle timeout. Real activity renews the session (`session.touch()`); a
- * periodic check notices once it has lapsed and ends it. A full reload is
- * used rather than tearing the Shell down by hand — the same "just reload"
- * pattern router.js's own fatal/error screens already use — which also
- * guarantees these listeners and this interval do not outlive the session.
+ * periodic check notices once it has lapsed and ends it via Firebase
+ * sign-out — handleAuthStateChange() picks that up and reloads.
  */
 function watchIdleSession() {
     let lastTouch = 0;
@@ -152,15 +175,11 @@ function watchIdleSession() {
         window.addEventListener(type, markActivity, { passive: true }));
 
     setInterval(() => {
-        if (!session.isAuthenticated()) signOutAndReload('idle');
+        if (session.isIdleFor(SESSION.idleTimeoutMs)) {
+            sessionStorage.setItem(LOGOUT_REASON_KEY, 'idle');
+            expireSession().catch((err) => console.error('Idle sign-out failed', err));
+        }
     }, 60000);
-}
-
-/** Ends the session for a reason other than a deliberate logout, then reloads to the login screen. */
-export async function signOutAndReload(reason) {
-    sessionStorage.setItem(LOGOUT_REASON_KEY, reason);
-    await expireSession();
-    location.reload();
 }
 
 function registerRoutes() {
@@ -193,7 +212,7 @@ function registerRoutes() {
 }
 
 /**
- * @param {object} user  The authenticated user record (see auth.service.js).
+ * @param {object} user  The provisioned Firestore user record (see auth.service.js).
  */
 async function hydrateSession(user) {
     const branches = await branches$.active();

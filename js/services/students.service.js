@@ -17,7 +17,7 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db, request } from '../core/db.js';
+import { db } from '../core/db.js';
 import { uid, sequenceNumber } from '../utils/id.js';
 import { localDate, nowISO, academicYearOf, ageFrom, daysBetween, addDays } from '../utils/date.js';
 import { formatMoney } from '../utils/money.js';
@@ -466,14 +466,20 @@ export async function bulkAssign(studentIds, batchId) {
     const actor = session.actorId();
     const updated = records.map((s) => ({ ...s, batchId, branchId: batch.branchId, updatedAt: at, updatedBy: actor }));
 
-    await db.unit(['students', 'auditLog'], async (s) => {
-        for (const record of updated) await request(s.students.put(record));
-        await request(s.auditLog.put({
-            id: uid('AUD'), entity: 'Student', entityId: null, action: 'bulkAssign',
-            detail: { batchId, count: updated.length },
-            actorId: actor, actorName: session.actorName(), at
-        }));
-    }, 'student:bulk-assign');
+    // Routed through students$.updateMany() (one atomic Firestore batch)
+    // rather than a raw db.unit() write — that write bypassed the Students
+    // repository entirely and would have kept targeting IndexedDB's
+    // `students` store after Milestone 3, orphaned from the Firestore
+    // collection `students$` actually points to. The audit row still goes
+    // to IndexedDB's auditLog, same as every other write in this file;
+    // Firestore and IndexedDB are different databases, so this can no
+    // longer be one atomic transaction spanning both the way it was before.
+    await students$.updateMany(updated);
+    await db.put('auditLog', {
+        id: uid('AUD'), entity: 'Student', entityId: null, action: 'bulkAssign',
+        detail: { batchId, count: updated.length },
+        actorId: actor, actorName: session.actorName(), at
+    });
 
     for (const student of updated) bus.emit(EVENTS.STUDENT_UPDATED, { student });
     return updated.length;

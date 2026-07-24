@@ -9,6 +9,211 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.5.0] — 2026-07-24 — Admissions Migration to Cloud Firestore
+
+Admissions is the third module migrated to Cloud Firestore (see ADR-014 and
+`docs/migrations/ADMISSIONS_MODULE_MIGRATION.md` for the full record).
+Every other module — Attendance, Fees, Finance, Expenses, Batches,
+Timetable, Reports, Dashboard — is unaffected and continues to run on
+IndexedDB exactly as before.
+
+### Added
+- **`admissions` Firestore collection**, with the same field names the
+  IndexedDB model used — no field renamed, and no new business-identifier
+  field introduced: `applicationNo` already served that role and is kept
+  unchanged, generated exactly as before (`settings$.nextSequence
+  ('application')`, still IndexedDB — see the migration doc for why this
+  wasn't moved to the centralized Firestore sequence generator).
+- **`firestore.rules`** extended for the `admissions` collection: read for
+  all four roles, create for Administrator and Teacher & Reception
+  (`admission.edit`), update for Administrator, Owner & Accountant and
+  Teacher & Reception (`admission.edit` or `admission.approve`), hard
+  delete denied outright (no code path uses it today).
+- **One-time data migration utility** (`js/migrations/
+  admissionDataMigration.js`) to carry a school's existing IndexedDB
+  admission records into the new Firestore collection — not part of
+  normal application operation, no UI entry point, run manually from the
+  browser DevTools console. See `docs/migrations/ADMISSIONS_DATA_MIGRATION.md`.
+
+### Fixed
+- **One call site that bypassed the Admissions repository entirely** —
+  `admissions.service.js`'s `enrolApplicant()` closed an enrolled
+  application via a raw IndexedDB transaction, not through `admissions$`.
+  Left as it was, it would have silently kept targeting the now-orphaned
+  IndexedDB store after this migration. Fixed to persist through the
+  repository; the function's batch/capacity checks, fee-plan lookup, and
+  student creation are otherwise unchanged.
+
+### Changed
+- The IndexedDB `AdmissionRepository` is archived, not deleted, at
+  `js/data/archive/admissions.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `admissions` section through Firestore, the same fix already
+  made for Students in Milestone 3.
+
+### Known trade-offs
+- `enrolApplicant()`'s student-creation and admission-closing writes now
+  both target Firestore (previously split across Firestore and
+  IndexedDB), but remain two sequential calls, not one atomic transaction
+  — a true cross-collection transaction is technically possible now that
+  both collections share one database, but wasn't implemented in this
+  pass (see the migration doc's Future Enhancements). The pre-existing
+  double-click risk this creates is unchanged from Milestone 3, not newly
+  introduced.
+- `firestore.rules`' `admissions` update rule does not replicate the full
+  client-side approval/status state machine field-by-field — disclosed
+  as a deliberate simplification in the migration doc §6.
+
+---
+
+## [2.4.1] — 2026-07-24 — Authentication Architecture Audit & Hardening
+
+A review-only audit of the Google Authentication / Firestore Sessions /
+IAM subsystem introduced in v2.3.0, followed by two low-severity hardening
+fixes it identified. No new authentication method, no redesign, no change
+to any other module. See `docs/audits/AUTHENTICATION_ARCHITECTURE_AUDIT.md`
+for the full audit record.
+
+### Fixed
+- **AUTH-001 — Orphaned Firestore session records on cross-tab sign-out.**
+  Signing out in one browser tab correctly signed every other open tab of
+  the same origin out too (Firebase's own cross-tab auth propagation
+  already handled that), but each tab's own audit-quality `sessions`
+  record — tracked per-tab, not shared — was never told to close when the
+  sign-out was *observed* from another tab rather than initiated locally.
+  `js/app.js`'s `handleAuthStateChange` now best-effort closes this tab's
+  session record (reason `cross_tab_signout`) before its existing reload.
+  No user-visible behaviour changed; this only corrects bookkeeping in a
+  collection nothing reads yet.
+- **AUTH-002 — `session.role()`'s fallback defaulted to the most-privileged
+  role.** A leftover default from the old five-role model returned
+  `'administrator'` if `role()` were ever called before a user was
+  hydrated. Not exploitable in practice — `session.can()`, the actual
+  authorization check, never depended on `role()` and already fails
+  closed — but the wrong default under a fail-secure standard. Now returns
+  `null`. Verified against every caller; no behaviour change for any
+  properly-hydrated session.
+
+### Changed
+- `js/data/sessions.repository.firestore.js`'s `end()` now documents a
+  third valid `reason` value, `'cross_tab_signout'`, alongside the existing
+  `'logout'` and `'idle_timeout'`.
+
+---
+
+## [2.4.0] — 2026-07-24 — Student Management Migration to Cloud Firestore
+
+Student Management is the second module migrated to Cloud Firestore (see
+ADR-014 and `docs/migrations/STUDENT_MODULE_MIGRATION.md` for the full
+record). Every other module — Admissions, Attendance, Fees, Finance,
+Expenses, Batches, Timetable, Reports, Dashboard — is unaffected and
+continues to run on IndexedDB exactly as before.
+
+### Added
+- **`students` Firestore collection**, with the same field names the
+  IndexedDB model used (`name`, `guardianPhone`, `level`, `admissionNo`, …
+  — none renamed to match a generic example schema, since a dozen other
+  files depend on these exact names).
+- **`studentCode`** (`STU000001`) — the new, permanent, ERP-wide student
+  identifier, generated automatically on every student creation. Kept
+  alongside the existing `admissionNo`, which remains the Admissions
+  module's own reference number and is not repurposed as a master
+  identifier. See the Data Model doc for the distinction.
+- **Centralized sequence generator** (`js/data/sequenceGenerator.firestore.js`)
+  — one reusable, transaction-safe counter mechanism for every business
+  code going forward. `users.repository.firestore.js`'s `nextUserCode()`
+  now calls this instead of its own duplicate counter transaction.
+- **Document Identifier Standard** adopted project-wide: a Firestore
+  document ID is always a purely technical value, never a business
+  identifier and never shown to a user. Documented in
+  `docs/architecture/firestore-data-model.md`, along with a documented
+  (not implemented) future subcollection hierarchy for student-scoped data.
+- **`firestore.rules`** extended for the `students` collection, mapped
+  directly from the existing role/capability model — read for all four
+  roles, create/edit for Administrator and Teacher & Reception, archive/
+  restore/hard-delete for Administrator only (enforced at the field level,
+  so an editor without delete rights can't archive a student by editing one).
+- **One-time data migration utility** (`js/migrations/studentDataMigration.js`)
+  to carry a school's existing IndexedDB student records into the new
+  Firestore collection — not part of normal application operation, no UI
+  entry point, run manually from the browser DevTools console. Preserves
+  `admissionNo` and original audit metadata, generates `studentCode` only
+  where missing, skips (or optionally updates) records that already exist
+  in Firestore, and never stops a batch on a single record's failure. See
+  `docs/migrations/STUDENT_DATA_MIGRATION.md`.
+
+### Fixed
+- **Two call sites that bypassed the Students repository entirely** —
+  `admissions.service.js`'s `enrolApplicant()` and `students.service.js`'s
+  `bulkAssign()` both wrote directly to the IndexedDB `students` store via
+  a raw transaction, not through `students$`. Left as they were, both would
+  have silently kept targeting the now-orphaned IndexedDB store after this
+  migration. Fixed to persist through the repository; each function's own
+  business logic and validation are otherwise unchanged.
+
+### Changed
+- The IndexedDB `StudentRepository` is archived, not deleted, at
+  `js/data/archive/students.repository.indexeddb.js` for rollback.
+
+### Known trade-offs
+- The atomic, single-transaction guarantee `enrolApplicant()` and
+  `bulkAssign()` previously had (student write + audit/admissions write, one
+  IndexedDB transaction) no longer holds now that the student write lands
+  in a different database (Firestore) than its audit/admissions follow-up
+  (IndexedDB). Both now write in a fixed, fail-safe order rather than
+  atomically together — see the migration record's Risks section for the
+  specific failure mode this accepts.
+
+---
+
+## [2.3.0] — 2026-07-24 — Google Identity & Session Foundation
+
+Authentication moves from a local, offline-first login to Google Sign-In
+backed by Firebase Authentication and Cloud Firestore — the first modules
+migrated off IndexedDB under the project's Google-platform architecture
+direction. Every other module (students, fees, attendance, finance, …) is
+unaffected and continues to run on IndexedDB exactly as before.
+
+### Added
+- **Google Sign-In**, replacing the temporary local email/password login.
+  Identity is verified by a real Google account; access still requires an
+  administrator-provisioned, active record in Firestore's `users`
+  collection — an unrecognised Google account is turned away with the same
+  message whether it doesn't exist, was archived, or was deactivated.
+- **AuthenticationProvider architecture.** AuthenticationService
+  (`js/services/auth.service.js`) now delegates the actual sign-in
+  mechanics to a provider (`js/services/auth/providers/`) — `GoogleProvider`
+  today, and a `MobileOTPProvider` placeholder that makes adding Mobile+OTP
+  sign-in later a matter of adding one file, not a redesign.
+- **Firestore Sessions.** Every sign-in now creates an audit-quality
+  session record (who, which provider, when it started and ended, and
+  why) — the foundation for a future "active sessions" admin view.
+- **Extended user profile.** Users now carry a `mobile` field and a
+  `loginType` (`Google` today; `Mobile`/`Both` once phone sign-in exists).
+- **Bootstrap Administrator.** The very first person to sign in on a
+  brand-new Firestore project is automatically provisioned as Administrator,
+  so there is always a way in on a fresh install.
+- **Combined role model.** Replaces the previous five roles (Owner,
+  Administrator, Registrar, Teacher, Accountant) with the four approved
+  roles: Administrator (full system access), Owner & Accountant (business
+  and finance), Teacher & Reception (academic operations), and Viewer
+  (read-only) — matching Document 10 §8.
+- **Firestore Security Rules** (`firestore.rules`) — the first real,
+  server-enforced security boundary this application has ever had, for the
+  `users`, `sessions`, and supporting `meta` collections.
+
+### Changed
+- The login screen now reads "Continue with Google", with a visibly
+  disabled Mobile Number / Send OTP section marked "Coming soon" beneath
+  it, matching the approved multi-login layout ahead of that feature
+  actually existing.
+
+### Removed
+- The temporary local password login (`js/utils/crypto.js`, seeded
+  passwords) is retired — Google Sign-In is now the only way in.
+
+---
+
 ## [2.2.5] — 2026-07-23 — UAT Round 5
 
 Three confirmed defects fixed after root-cause investigation; Payroll's

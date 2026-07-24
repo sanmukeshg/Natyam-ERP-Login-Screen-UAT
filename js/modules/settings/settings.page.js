@@ -888,12 +888,13 @@ export default class SettingsPage extends Page {
 
         return html`
             <div class="alert alert-info">
-                <div class="alert-title">Roles are an operating convention, not a security boundary</div>
+                <div class="alert-title">Roles are enforced two ways</div>
                 <p class="alert-body">
-                    This system has no server. Anyone with access to this computer and this browser can
-                    reach the underlying database regardless of the role set here. Roles keep people out
-                    of screens that are not their job — they do not protect data from a determined person
-                    at the keyboard. Device login is what protects the records.
+                    Signing in and who may manage users is enforced by Firestore's security rules —
+                    a real, server-side boundary. Capability checks like the ones controlling what you
+                    see on other screens in this app are still a client-side convention for everything
+                    not yet migrated off this browser's local database, and do not protect that data
+                    from a determined person at the keyboard.
                 </p>
             </div>
 
@@ -962,7 +963,7 @@ export default class SettingsPage extends Page {
                 { name: 'email', label: 'Email', type: 'email', width: 'half', value: user?.email },
                 {
                     name: 'role', label: 'Role', type: 'select', required: true, width: 'half',
-                    value: user?.role || 'registrar',
+                    value: user?.role || 'teacher_reception',
                     options: Object.entries(roleTable()).map(([value, role]) => ({
                         value, label: role.label, note: role.description
                     }))

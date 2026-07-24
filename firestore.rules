@@ -1,0 +1,206 @@
+// NATYAM ERP — Firestore Security Rules (Auth, Users, Sessions, Students & Admissions)
+//
+// This is the real security boundary the old IndexedDB app never had.
+// Paste this into Firebase Console → Firestore Database → Rules (or deploy
+// with `firebase deploy --only firestore:rules` once the Firebase CLI is
+// set up) — I have no access to your project to do this myself.
+//
+// `users` documents are keyed by the person's lowercased email address
+// (see js/data/users.repository.firestore.js for why), so `request.auth.
+// token.email.lower()` always points straight at "the caller's own
+// document" without needing a query.
+//
+// Role model: Administrator / Owner & Accountant / Teacher & Reception /
+// Viewer (Doc 10 §8) — Administrator is the sole full-access role. Every
+// role-gated collection below mirrors the capability grants already
+// defined in js/config/app.config.js's `ROLES` table; this file does not
+// re-decide who can do what, only enforces it server-side.
+//
+// Everything outside `users`/`meta`/`sessions`/`students`/`admissions` is
+// denied by default: every other module (attendance, fees, …) is still on
+// IndexedDB in this phase and has no Firestore collection to protect yet.
+// The final catch-all rule must stay last, and must be revisited as later
+// phases add real collections here.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function isOwnDoc(userId) {
+      return signedIn() && userId == myEmail();
+    }
+
+    // Direct path lookup — works because the doc id *is* the caller's email.
+    function callerDoc() {
+      return get(/databases/$(database)/documents/users/$(myEmail()));
+    }
+
+    // exists() must come first: on a first-ever sign-in the caller has no
+    // /users doc yet, and reading .data off get() of a document that
+    // doesn't exist throws — which, unguarded, poisons any check built on
+    // it and denies even legitimate cases (like bootstrap). && short-
+    // circuits, so a missing/inactive/archived doc safely resolves through
+    // to "no role" rather than erroring.
+    function isProvisionedActiveUser() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(myEmail()))
+        && callerDoc().data.status == 'active'
+        && callerDoc().data.deletedAt == null;
+    }
+
+    function myRole() {
+      return isProvisionedActiveUser() ? callerDoc().data.role : null;
+    }
+
+    function isAdministrator() {
+      return myRole() == 'administrator';
+    }
+
+    function isTeacherReception() {
+      return myRole() == 'teacher_reception';
+    }
+
+    // student.edit is granted to exactly these two roles in app.config.js's
+    // ROLES table — Owner & Accountant and Viewer are read-only for Students.
+    function canManageStudents() {
+      return isAdministrator() || isTeacherReception();
+    }
+
+    function isOwnerAccountant() {
+      return myRole() == 'owner_accountant';
+    }
+
+    // admission.edit is granted to exactly these two roles — same role set
+    // as canManageStudents() today, but kept as its own named function since
+    // admission.edit and student.edit are distinct capabilities in
+    // app.config.js that merely happen to share a role set right now; a
+    // future change to either grant should not silently affect the other.
+    function canManageAdmissions() {
+      return isAdministrator() || isTeacherReception();
+    }
+
+    // admission.approve is granted to Administrator, Owner & Accountant and
+    // Teacher & Reception — everyone except Viewer.
+    function canApproveAdmissions() {
+      return isAdministrator() || isOwnerAccountant() || isTeacherReception();
+    }
+
+    // True when a write touches only soft-delete bookkeeping fields — used
+    // to require Administrator specifically for archive/restore even where
+    // a role otherwise has general edit rights (student.delete is
+    // Administrator-only; student.edit is broader).
+    function isArchiveOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['deletedAt', 'deletedBy', 'updatedAt', 'updatedBy']);
+    }
+
+    match /users/{userId} {
+      // A person may always read their own record (to resolve their own
+      // role/status on sign-in); an Administrator may read anyone's.
+      allow read: if isOwnDoc(userId) || isAdministrator();
+
+      // Normal provisioning: only an existing Administrator may create a
+      // user record. One-time exception: while `meta/bootstrapped` does
+      // not yet exist, the first person to sign in may create themself —
+      // as Administrator only. See bootstrapAdministrator() in the
+      // repository.
+      allow create: if isAdministrator()
+        || (isOwnDoc(userId)
+            && request.resource.data.role == 'administrator'
+            && !exists(/databases/$(database)/documents/meta/bootstrapped));
+
+      // Profile edits, role changes, activate/deactivate/archive (a
+      // soft-delete update, not a hard delete) — Administrator only.
+      allow update: if isAdministrator();
+      allow delete: if false;
+    }
+
+    // Set once, atomically, alongside the bootstrap administrator's user
+    // doc. Its mere existence retires the bootstrap exception above forever.
+    match /meta/bootstrapped {
+      allow read: if signedIn();
+      allow write: if isAdministrator() || !exists(/databases/$(database)/documents/meta/bootstrapped);
+    }
+
+    // Shared business-code counter (USR000001, STU000001, …) — see
+    // js/data/sequenceGenerator.firestore.js. Writable by anyone who can
+    // create a code-bearing entity; today that's Administrator (users) and
+    // Administrator + Teacher & Reception (students), i.e. canManageStudents().
+    match /meta/counters {
+      allow read, write: if canManageStudents();
+    }
+
+    // One document per sign-in (js/data/sessions.repository.firestore.js).
+    // A person may create and end only their own; an Administrator may
+    // read anyone's, for a future "active sessions" admin view. Never
+    // deleted — ended sessions are a soft-delete update (endedAt/reason),
+    // the same audit-trail convention every other module uses.
+    match /sessions/{sessionId} {
+      allow create: if signedIn() && request.resource.data.userId == myEmail();
+      allow read: if signedIn() && (resource.data.userId == myEmail() || isAdministrator());
+      allow update: if signedIn() && resource.data.userId == myEmail();
+      allow delete: if false;
+    }
+
+    // Milestone 3 (see ADR-014, docs/migrations/STUDENT_MODULE_MIGRATION.md).
+    match /students/{studentId} {
+      // Every role has student.view — Administrator, Owner & Accountant,
+      // Teacher & Reception, Viewer alike.
+      allow read: if isProvisionedActiveUser();
+
+      allow create: if canManageStudents();
+
+      // A general profile/status edit needs student.edit (Administrator or
+      // Teacher & Reception); a write that *only* touches archive/restore
+      // bookkeeping needs student.delete (Administrator alone) instead —
+      // otherwise a Teacher & Reception account with edit rights could
+      // archive a student merely because it can edit one.
+      allow update: if (canManageStudents() && !isArchiveOnly())
+        || (isAdministrator() && isArchiveOnly());
+
+      // Hard delete (students.service.js's deleteStudent(), which also
+      // removes the student's invoices/attendance/certificates/documents)
+      // requires student.delete — Administrator only, same as archive.
+      allow delete: if isAdministrator();
+    }
+
+    // Milestone 5 (see ADR-014, docs/migrations/ADMISSIONS_MODULE_MIGRATION.md).
+    match /admissions/{admissionId} {
+      // Every role has admission.view — Administrator, Owner & Accountant,
+      // Teacher & Reception, Viewer alike.
+      allow read: if isProvisionedActiveUser();
+
+      // Only submit() requires admission.edit, held by Administrator and
+      // Teacher & Reception only.
+      allow create: if canManageAdmissions();
+
+      // Every other write (review/approve/reject/reopen/enrol) requires
+      // either admission.edit or admission.approve — the union of both is
+      // Administrator, Owner & Accountant and Teacher & Reception. This
+      // does not replicate the full client-side status-transition state
+      // machine field-by-field (a real design task, not attempted here) —
+      // it draws the one boundary that matters server-side: Viewer can
+      // never write to this collection. See the migration doc's Risks
+      // section for this disclosed simplification.
+      allow update: if canManageAdmissions() || canApproveAdmissions();
+
+      // No hard-delete path exists in the application today (admissions
+      // are only ever soft-deleted, and even that isn't currently wired
+      // into any UI or service function) — denied outright rather than
+      // granted speculatively ahead of a real need.
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

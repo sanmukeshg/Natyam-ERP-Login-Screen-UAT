@@ -52,7 +52,7 @@ export default class DashboardPage extends Page {
 
         // A teacher's dashboard is a different question, not a subset of this
         // one — they need their registers, not the school's cash position.
-        this.teacherMode = session.role() === 'teacher' && !session.can('finance.view');
+        this.teacherMode = session.role() === 'teacher_reception' && !session.can('finance.view');
 
         render(container, this.shell());
         this.bindEvents();

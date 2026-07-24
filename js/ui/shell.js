@@ -301,9 +301,11 @@ export class Shell {
             session.setPref('theme', next);
         });
 
-        on(this.root, 'click', '[data-action="logout"]', async () => {
-            await logout();
-            location.reload();
+        on(this.root, 'click', '[data-action="logout"]', () => {
+            // Firebase's own auth-state change (not this handler) is what
+            // reloads back to the login screen — see app.js's
+            // handleAuthStateChange().
+            logout().catch((err) => console.error('Sign out failed', err));
         });
 
         on(this.root, 'change', '[data-role="branch-select"]', (_e, target) => {

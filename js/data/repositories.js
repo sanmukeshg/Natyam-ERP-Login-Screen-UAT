@@ -17,8 +17,8 @@ import { Repository } from '../core/repository.js';
 import { db, request } from '../core/db.js';
 import { localDate, monthKey } from '../utils/date.js';
 import {
-    STUDENT_STATUS, ADMISSION_STATUS, INVOICE_STATUS,
-    ATTENDANCE_STATUS, LEVELS, CURRICULUM_STATUS, DEFAULT_FEE_FREQUENCY, feeFrequency
+    INVOICE_STATUS,
+    ATTENDANCE_STATUS, CURRICULUM_STATUS, DEFAULT_FEE_FREQUENCY, feeFrequency
 } from '../config/app.config.js';
 
 /* ==========================================================================
@@ -79,163 +79,24 @@ class AcademicYearRepository extends Repository {
    STUDENTS
    ========================================================================== */
 
-class StudentRepository extends Repository {
-    constructor() {
-        super({
-            store: 'students',
-            prefix: 'STU',
-            entity: 'Student',
-            searchFields: ['name', 'admissionNo', 'guardianName', 'guardianPhone', 'level']
-        });
-    }
-
-    beforeSave(record) {
-        return {
-            ...record,
-            name: String(record.name || '').trim().replace(/\s+/g, ' '),
-            status: record.status || STUDENT_STATUS.ACTIVE,
-            guardianPhone: normalisePhone(record.guardianPhone),
-            alternatePhone: normalisePhone(record.alternatePhone),
-            emergencyContact: normalisePhone(record.emergencyContact)
-        };
-    }
-
-    validate(record) {
-        if (!record.name) throw new Error('A student needs a name.');
-        if (!record.branchId) throw new Error('A student must belong to a branch.');
-        if (!record.level) throw new Error('A student must be placed at a level.');
-        if (!LEVELS.some((l) => l.value === record.level)) throw new Error(`"${record.level}" is not a recognised level.`);
-        if (!record.guardianPhone) throw new Error('A guardian contact number is required.');
-        if (record.dateOfBirth && record.dateOfBirth > localDate()) throw new Error('Date of birth cannot be in the future.');
-    }
-
-    async active(branchId = null) {
-        const rows = await this.where('status', STUDENT_STATUS.ACTIVE);
-        return branchId ? rows.filter((s) => s.branchId === branchId) : rows;
-    }
-
-    async byBatch(batchId) {
-        return (await this.where('batchId', batchId))
-            .filter((s) => s.status !== STUDENT_STATUS.INACTIVE)
-            .sort((a, b) => a.name.localeCompare(b.name, 'en-IN'));
-    }
-
-    async byBranch(branchId) {
-        return this.where('branchId', branchId);
-    }
-
-    /** Students with no batch — the queue a registrar has to clear. */
-    async unassigned() {
-        return (await this.active()).filter((s) => !s.batchId);
-    }
-
-    /** Birthdays falling inside the given calendar month (1–12). */
-    async birthdaysIn(month) {
-        const key = String(month).padStart(2, '0');
-        return (await this.active()).filter((s) => (s.dateOfBirth || '').slice(5, 7) === key);
-    }
-
-    async countsByLevel(branchId = null) {
-        const rows = (await this.active(branchId));
-        return LEVELS.map((level) => ({
-            level: level.value,
-            label: level.label,
-            count: rows.filter((s) => s.level === level.value).length
-        }));
-    }
-
-    /**
-     * Moving a student between batches is a two-field change that people get
-     * wrong by editing only one of them, so it is a named operation.
-     */
-    async transfer(id, { batchId, branchId }) {
-        const student = await this.findOrFail(id);
-        return this.update(id, {
-            batchId: batchId ?? student.batchId,
-            branchId: branchId ?? student.branchId
-        });
-    }
-
-    async promote(id) {
-        const student = await this.findOrFail(id);
-        const index = LEVELS.findIndex((l) => l.value === student.level);
-        if (index === -1) throw new Error('This student is at an unrecognised level.');
-        if (index === LEVELS.length - 1) throw new Error(`${student.name} is already at ${LEVELS[index].label}, the highest level.`);
-        return this.update(id, { level: LEVELS[index + 1].value, batchId: null });
-    }
-}
+// StudentRepository moved to Firestore (Milestone 3) — see
+// students.repository.firestore.js. The old IndexedDB implementation is
+// archived, not deleted, at js/data/archive/students.repository.indexeddb.js.
+// `students$` is re-exported from the Firestore module below so every
+// existing caller (students.service.js, admissions.service.js, and every
+// module that reads it) keeps importing it from this same file, unchanged.
 
 /* ==========================================================================
    ADMISSIONS
    ========================================================================== */
 
-class AdmissionRepository extends Repository {
-    constructor() {
-        super({
-            store: 'admissions',
-            prefix: 'ADM',
-            entity: 'Admission',
-            searchFields: ['name', 'applicationNo', 'guardianName', 'guardianPhone']
-        });
-    }
-
-    beforeSave(record) {
-        return {
-            ...record,
-            name: String(record.name || '').trim().replace(/\s+/g, ' '),
-            status: record.status || ADMISSION_STATUS.SUBMITTED,
-            guardianPhone: normalisePhone(record.guardianPhone),
-            appliedOn: record.appliedOn || localDate()
-        };
-    }
-
-    validate(record) {
-        if (!record.name) throw new Error('The applicant needs a name.');
-        if (!record.branchId) throw new Error('Choose the branch being applied to.');
-        if (!record.guardianPhone) throw new Error('A parent or guardian contact number is required.');
-        if (!record.level) throw new Error('Choose a starting level.');
-    }
-
-    async pending() {
-        const rows = await this.all();
-        return rows.filter((a) => [ADMISSION_STATUS.SUBMITTED, ADMISSION_STATUS.REVIEWING].includes(a.status));
-    }
-
-    async byStatus(status) {
-        return this.where('status', status);
-    }
-
-    async recent(limit = 5) {
-        return (await this.all())
-            .sort((a, b) => (b.appliedOn || '').localeCompare(a.appliedOn || ''))
-            .slice(0, limit);
-    }
-
-    /** Duplicate guard: same name and guardian phone, still in the pipeline. */
-    async findLikeness({ name, guardianPhone }) {
-        const phone = normalisePhone(guardianPhone);
-        if (!phone) return null;
-        const rows = await this.all();
-        return rows.find((a) =>
-            a.status !== ADMISSION_STATUS.REJECTED &&
-            a.guardianPhone === phone &&
-            a.name.toLowerCase() === String(name || '').trim().toLowerCase()
-        ) || null;
-    }
-
-    /** Same match as findLikeness, but returns every other application that matches (self excluded) — for display, not a submit-time guard. */
-    async findAllLikeness({ id, name, guardianPhone }) {
-        const phone = normalisePhone(guardianPhone);
-        if (!phone) return [];
-        const rows = await this.all();
-        return rows.filter((a) =>
-            a.id !== id &&
-            a.status !== ADMISSION_STATUS.REJECTED &&
-            a.guardianPhone === phone &&
-            a.name.toLowerCase() === String(name || '').trim().toLowerCase()
-        );
-    }
-}
+// AdmissionRepository moved to Firestore (Milestone 5) — see
+// admissions.repository.firestore.js. The old IndexedDB implementation is
+// archived, not deleted, at js/data/archive/admissions.repository.indexeddb.js.
+// `admissions$` is re-exported from the Firestore module below so every
+// existing caller (admissions.service.js, reports/dashboard/analytics/
+// notifications/search.service.js) keeps importing it from this same file,
+// unchanged.
 
 /* ==========================================================================
    ADMISSION DRAFTS
@@ -902,28 +763,10 @@ class AuditRepository extends Repository {
     }
 }
 
-class UserRepository extends Repository {
-    constructor() {
-        super({ store: 'users', prefix: 'USR', entity: 'User', searchFields: ['name', 'email', 'role'] });
-    }
-
-    validate(record) {
-        if (!record.name?.trim()) throw new Error('A user needs a name.');
-        if (!record.role) throw new Error('Choose a role.');
-    }
-
-    async activeUsers() {
-        return (await this.all()).filter((u) => u.status === 'active');
-    }
-
-    /** Case-insensitive lookup by email — the login identifier. */
-    async findByEmail(email) {
-        const q = String(email || '').trim().toLowerCase();
-        if (!q) return null;
-        const rows = await this.all({ includeDeleted: true });
-        return rows.find((u) => (u.email || '').toLowerCase() === q) || null;
-    }
-}
+// UserRepository moved to Firestore — see users.repository.firestore.js.
+// `users$` is re-exported from there below so every existing caller
+// (settings.service.js, audit.service.js, auth.service.js, app.js) keeps
+// importing it from this same module, unchanged.
 
 /* ==========================================================================
    CURRICULUM & ACADEMIC STRUCTURE (Phase 2)
@@ -1056,8 +899,8 @@ function normalisePhone(value) {
 
 export const branches$      = new BranchRepository();
 export const academicYears$ = new AcademicYearRepository();
-export const students$      = new StudentRepository();
-export const admissions$    = new AdmissionRepository();
+export { students$ } from './students.repository.firestore.js';
+export { admissions$ } from './admissions.repository.firestore.js';
 export const drafts$        = new AdmissionDraftRepository();
 export const batches$       = new BatchRepository();
 export const staff$         = new StaffRepository();
@@ -1075,7 +918,7 @@ export const certificates$  = new CertificateRepository();
 export const documents$     = new DocumentRepository();
 export const notifications$ = new NotificationRepository();
 export const audit$         = new AuditRepository();
-export const users$         = new UserRepository();
+export { users$ } from './users.repository.firestore.js';
 export const curricula$        = new CurriculumRepository();
 export const curriculumLevels$ = new CurriculumLevelRepository();
 

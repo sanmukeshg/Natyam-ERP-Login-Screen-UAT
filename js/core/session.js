@@ -6,17 +6,20 @@
  * an actor, every query scopes to a branch — so this is a plain synchronous
  * object hydrated once at boot.
  *
- * A note on what this is not: with no server, this is an *operational* role
- * system, not a security boundary. Anyone with the device can open devtools
- * and change it. It exists so a teacher's screen is not cluttered with the
- * accountant's tools and so a mis-click cannot delete a fee record. Genuine
- * access control needs the backend the architecture is being kept ready for,
- * and that should be said plainly rather than implied by a lock icon.
+ * Identity is real now: Firebase Authentication (Google Sign-In) verifies
+ * who is signing in, and firestore.rules enforces who may read or write a
+ * `users` document server-side — not just this object's in-memory checks.
+ * That said, role-based capability gating (`can()`, below) is still only
+ * enforced *here*, client-side, for every module still on IndexedDB — a
+ * teacher's screen has no Finance link, but nothing stops a determined
+ * person from editing this object in devtools for those modules. As more of
+ * the app moves to Firestore, its rules become the real boundary for that
+ * data too; until then, this remains an operational convenience for
+ * anything not yet migrated, not a security guarantee for it.
  */
 
-import { roleCapabilities, roleLabel as resolveRoleLabel, PREFERENCE_DEFAULTS, SESSION } from '../config/app.config.js';
+import { roleCapabilities, roleLabel as resolveRoleLabel, PREFERENCE_DEFAULTS } from '../config/app.config.js';
 import { bus, EVENTS } from './bus.js';
-import { uid } from '../utils/id.js';
 
 const STORAGE_KEY = 'natyam.session';
 
@@ -26,6 +29,7 @@ class Session {
         this.branches = [];
         this.activeBranchId = null;
         this._capabilities = new Set();
+        this._lastActivityAt = 0;
     }
 
     /** Called once during boot, after branches and users are loaded. */
@@ -38,62 +42,39 @@ class Session {
         this.activeBranchId = this.branches.some((b) => b.id === candidate) ? candidate : (this.branches[0]?.id || null);
 
         this._capabilities = new Set(roleCapabilities(user?.role));
+        this._lastActivityAt = Date.now();
         this._persist();
     }
 
     /* ----------------------------------------------------- AUTHENTICATION */
 
     /**
-     * Starts a signed-in session for `user`, persisted alongside the existing
-     * preferences blob. Called by auth.service.js once credentials check out;
-     * it only records that a session exists — hydrating capabilities and the
-     * branch list is still `hydrate()`'s job, called separately once branches
-     * are loaded.
+     * Whether someone is currently signed in. Firebase Authentication owns
+     * the actual session — its own persisted, auto-refreshing token — so
+     * this is just "has hydrate() run for a real user". app.js sets this by
+     * calling hydrate() when Firebase reports a signed-in, provisioned user,
+     * and destroySession() when it reports signed-out or an idle timeout.
      */
-    createSession(user) {
-        const now = Date.now();
-        const stored = this._readStored();
-        stored.auth = {
-            token: uid('SES'),
-            userId: user.id,
-            expiresAt: now + SESSION.idleTimeoutMs,
-            lastActivityAt: now
-        };
-        this._write(stored);
-    }
-
-    /** Returns the persisted auth record, or null if absent or expired. */
-    validateSession() {
-        const auth = this._readStored().auth;
-        if (!auth) return null;
-        if (Date.now() > auth.expiresAt) return null;
-        return auth;
-    }
-
     isAuthenticated() {
-        return this.validateSession() !== null;
+        return this.user !== null;
     }
 
     /**
-     * Renews an active session on genuine user activity: pushes the expiry
-     * forward without changing the token. A no-op once the session has
-     * already expired — activity after that point should not resurrect it.
+     * Idle timeout is an app-level feature layered on top of Firebase Auth
+     * (which has no built-in idle expiry). Kept in memory only — closing and
+     * reopening the tab resumes Firebase's own session and starts a fresh
+     * idle window, which is the behaviour a returning user expects.
      */
     touch() {
-        const stored = this._readStored();
-        if (!stored.auth) return;
-        const now = Date.now();
-        if (now > stored.auth.expiresAt) return;
-        stored.auth.lastActivityAt = now;
-        stored.auth.expiresAt = now + SESSION.idleTimeoutMs;
-        this._write(stored);
+        if (this.isAuthenticated()) this._lastActivityAt = Date.now();
     }
 
-    /** Ends the session. Preferences (theme, density, …) are left alone. */
+    isIdleFor(timeoutMs) {
+        return this.isAuthenticated() && (Date.now() - this._lastActivityAt) > timeoutMs;
+    }
+
+    /** Clears local identity. Preferences (theme, density, …) are left alone. */
     destroySession() {
-        const stored = this._readStored();
-        stored.auth = null;
-        this._write(stored);
         this.user = null;
         this.branches = [];
         this.activeBranchId = null;
@@ -104,7 +85,12 @@ class Session {
 
     actorId()   { return this.user?.id || 'system'; }
     actorName() { return this.user?.name || 'System'; }
-    role()      { return this.user?.role || 'owner'; }
+    // Fails secure: no hydrated user means no role, not the most-privileged
+    // one. can() never depended on this and already fails closed on its own;
+    // this only matters to code that reads role() directly (roleLabel()
+    // below, and dashboard.page.js's teacher-mode check), and null cannot be
+    // mistaken for any real role by either.
+    role()      { return this.user?.role || null; }
     roleLabel() { return resolveRoleLabel(this.role()) || 'User'; }
 
     /* ----------------------------------------------------------- CAPABILITY */
@@ -155,8 +141,9 @@ class Session {
     }
 
     /**
-     * Standard scope predicate. A branch of null means "all branches", which
-     * owners and administrators may select and other roles may not.
+     * Standard scope predicate. A branch of null means "all branches" — who
+     * may select that is a capability check elsewhere (shell.js), not a
+     * role check here.
      */
     scopeFilter() {
         const id = this.activeBranchId;

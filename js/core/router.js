@@ -22,6 +22,7 @@ import { session } from './session.js';
 import { html, render } from '../utils/dom.js';
 import { icon } from '../ui/icons.js';
 import { expireSession } from '../services/auth.service.js';
+import { users$ } from '../data/repositories.js';
 
 class Router {
     constructor() {
@@ -100,6 +101,20 @@ class Router {
             location.reload();
             return;
         }
+
+        // A user's own account can be deactivated or archived by an admin
+        // while they still have the app open elsewhere — Document 6 §10
+        // wants that to end their session, not just block their next
+        // sign-in (already true via auth.service.js's provisioning check).
+        // Re-checking the live Firestore record on every navigation is how
+        // a same-browser session actually notices.
+        const current = await users$.find(session.user.id).catch(() => null);
+        if (!current || current.status !== 'active') {
+            await expireSession();
+            location.reload();
+            return;
+        }
+
         session.touch();
 
         const raw = window.location.hash.slice(1) || '/';
@@ -248,7 +263,7 @@ class Router {
                         <div class="empty-glyph">${icon('lock')}</div>
                         <h2 class="empty-title">${route.title || 'This module'} is not available to your role</h2>
                         <p class="empty-text">You are signed in as ${session.roleLabel()}.
-                        An owner or administrator can grant access in Settings → Roles.</p>
+                        An Administrator can grant access in Settings → Roles.</p>
                         <div class="empty-actions">
                             <a class="btn btn-secondary" href="#/">Back to dashboard</a>
                         </div>

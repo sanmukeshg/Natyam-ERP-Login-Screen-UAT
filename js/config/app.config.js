@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.2.5',
+    version: '2.5.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -16,15 +16,13 @@ export const APP = Object.freeze({
 });
 
 /**
- * Session & authentication. There is no server to enforce these, so a
- * password check here gates the UI rather than being a real security
- * boundary — see js/core/session.js for the fuller note. `idleTimeoutMs`
+ * Session. Identity itself is verified by Firebase Authentication now — see
+ * js/core/session.js for what that does and does not cover. `idleTimeoutMs`
  * has no source-of-truth value in the IAM specs; 30 minutes is a sensible
  * default for a front-desk device and is safe to change in one place.
  */
 export const SESSION = Object.freeze({
-    idleTimeoutMs: 30 * 60 * 1000,
-    hashIterations: 150000
+    idleTimeoutMs: 30 * 60 * 1000
 });
 
 /* ==========================================================================
@@ -490,52 +488,73 @@ export const CAPABILITIES = Object.freeze({
     REPORT_VIEW: 'report.view', REPORT_EXPORT: 'report.export',
     SETTINGS_VIEW: 'settings.view', SETTINGS_EDIT: 'settings.edit',
     AUDIT_VIEW: 'audit.view',
-    BACKUP_MANAGE: 'backup.manage'
+    BACKUP_MANAGE: 'backup.manage',
+    // Action-level permissions inside the Users tab — settings.edit still
+    // gates whether the tab is reachable at all; these gate which of its
+    // buttons a given role actually sees (Doc 6 §22).
+    USER_VIEW: 'user.view', USER_CREATE: 'user.create', USER_EDIT: 'user.edit',
+    USER_ACTIVATE: 'user.activate', USER_DEACTIVATE: 'user.deactivate',
+    USER_ARCHIVE: 'user.archive', USER_CHANGE_ROLE: 'user.changeRole'
 });
 
 const ALL_CAPS = Object.values(CAPABILITIES);
 
+/**
+ * Four roles, per the IAM Security Policy (Document 10 §8) and this
+ * project's approved combined role model — not five. `owner` + `accountant`
+ * merge into `owner_accountant`; `registrar` + `teacher` merge into
+ * `teacher_reception` (a registrar's admissions/students/attendance/fee
+ * work is front-office "reception" work in this model); `administrator`
+ * becomes the sole full-access role (previously shared with `owner`); and
+ * `viewer` is new — read-only across every module, for someone who needs
+ * visibility without being able to change anything.
+ *
+ * Each merged role keeps the union of its predecessors' capabilities,
+ * except `owner_accountant`, which additionally gets SETTINGS_VIEW (an
+ * owner-type person reasonably wants to see institute configuration) but
+ * deliberately not SETTINGS_EDIT/AUDIT_VIEW/BACKUP_MANAGE/USER_* — those
+ * are "Full System Access" concerns the spec reserves to Administrator
+ * alone (Doc 6 §22: "only an Administrator creates users").
+ */
 export const ROLES = Object.freeze({
-    owner: {
-        label: 'Owner',
-        description: 'Full access, including settings, finance and backups.',
-        capabilities: ALL_CAPS
-    },
     administrator: {
         label: 'Administrator',
-        description: 'Runs day-to-day operations across every branch.',
-        capabilities: ALL_CAPS.filter((c) => c !== CAPABILITIES.BACKUP_MANAGE)
+        description: 'Full system access — settings, backups, user management and every module.',
+        capabilities: ALL_CAPS
     },
-    registrar: {
-        label: 'Registrar',
-        description: 'Admissions, students, attendance and fee collection.',
+    owner_accountant: {
+        label: 'Owner & Accountant',
+        description: 'Business and finance: admissions oversight, collections, expenses, salaries and financial reports.',
+        capabilities: [
+            CAPABILITIES.STUDENT_VIEW,
+            CAPABILITIES.ADMISSION_VIEW, CAPABILITIES.ADMISSION_APPROVE,
+            CAPABILITIES.FEE_VIEW, CAPABILITIES.FEE_COLLECT, CAPABILITIES.FEE_REFUND, CAPABILITIES.FEE_WAIVE,
+            CAPABILITIES.FINANCE_VIEW, CAPABILITIES.FINANCE_EDIT,
+            CAPABILITIES.STAFF_VIEW, CAPABILITIES.PROGRAM_VIEW,
+            CAPABILITIES.REPORT_VIEW, CAPABILITIES.REPORT_EXPORT,
+            CAPABILITIES.SETTINGS_VIEW
+        ]
+    },
+    teacher_reception: {
+        label: 'Teacher & Reception',
+        description: 'Academic operations: admissions, students, attendance, fee collection, batches and programmes.',
         capabilities: [
             CAPABILITIES.STUDENT_VIEW, CAPABILITIES.STUDENT_EDIT,
             CAPABILITIES.ADMISSION_VIEW, CAPABILITIES.ADMISSION_EDIT, CAPABILITIES.ADMISSION_APPROVE,
             CAPABILITIES.ATTENDANCE_VIEW, CAPABILITIES.ATTENDANCE_MARK,
             CAPABILITIES.FEE_VIEW, CAPABILITIES.FEE_COLLECT,
-            CAPABILITIES.PROGRAM_VIEW, CAPABILITIES.REPORT_VIEW, CAPABILITIES.REPORT_EXPORT,
+            CAPABILITIES.PROGRAM_VIEW, CAPABILITIES.PROGRAM_EDIT,
+            CAPABILITIES.REPORT_VIEW, CAPABILITIES.REPORT_EXPORT,
             CAPABILITIES.STAFF_VIEW
         ]
     },
-    teacher: {
-        label: 'Teacher',
-        description: 'Own batches: roll call, student progress, programmes.',
+    viewer: {
+        label: 'Viewer',
+        description: 'Read-only access across every module — no edits, approvals, collections or exports.',
         capabilities: [
-            CAPABILITIES.STUDENT_VIEW,
-            CAPABILITIES.ATTENDANCE_VIEW, CAPABILITIES.ATTENDANCE_MARK,
-            CAPABILITIES.PROGRAM_VIEW, CAPABILITIES.PROGRAM_EDIT,
-            CAPABILITIES.REPORT_VIEW
-        ]
-    },
-    accountant: {
-        label: 'Accountant',
-        description: 'Collections, expenses, salaries and financial reports.',
-        capabilities: [
-            CAPABILITIES.STUDENT_VIEW,
-            CAPABILITIES.FEE_VIEW, CAPABILITIES.FEE_COLLECT, CAPABILITIES.FEE_REFUND, CAPABILITIES.FEE_WAIVE,
-            CAPABILITIES.FINANCE_VIEW, CAPABILITIES.FINANCE_EDIT,
-            CAPABILITIES.REPORT_VIEW, CAPABILITIES.REPORT_EXPORT
+            CAPABILITIES.STUDENT_VIEW, CAPABILITIES.ADMISSION_VIEW, CAPABILITIES.ATTENDANCE_VIEW,
+            CAPABILITIES.FEE_VIEW, CAPABILITIES.FINANCE_VIEW, CAPABILITIES.STAFF_VIEW,
+            CAPABILITIES.PROGRAM_VIEW, CAPABILITIES.REPORT_VIEW, CAPABILITIES.SETTINGS_VIEW
         ]
     }
 });

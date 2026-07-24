@@ -58,7 +58,7 @@ export function field(config) {
     }
 
     if (type === 'divider') {
-        return html`<div class="divider divider-labelled" data-label="${label || ''}"></div>`;
+        return html`<div class="divider divider-labelled">${label || ''}</div>`;
     }
 
     if (type === 'static') {
