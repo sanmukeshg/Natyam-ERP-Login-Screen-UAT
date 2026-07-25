@@ -259,8 +259,7 @@ class FirestoreFeePlanRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(feePlansCollection), {
+                setBatch.set(doc(feePlansCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

@@ -318,8 +318,7 @@ class FirestoreBatchRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(batchesCollection), {
+                setBatch.set(doc(batchesCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

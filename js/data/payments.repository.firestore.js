@@ -273,8 +273,7 @@ class FirestorePaymentRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(paymentsCollection), {
+                setBatch.set(doc(paymentsCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

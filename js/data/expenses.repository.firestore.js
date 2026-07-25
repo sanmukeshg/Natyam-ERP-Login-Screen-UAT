@@ -261,8 +261,7 @@ class FirestoreExpenseRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(expensesCollection), {
+                setBatch.set(doc(expensesCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

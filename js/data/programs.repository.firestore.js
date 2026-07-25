@@ -251,8 +251,7 @@ class FirestoreProgramRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(programsCollection), {
+                setBatch.set(doc(programsCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

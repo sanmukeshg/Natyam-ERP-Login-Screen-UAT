@@ -194,8 +194,7 @@ class FirestoreAdmissionDraftRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(draftsCollection), data);
+                setBatch.set(doc(draftsCollection, id), data);
             }
             await setBatch.commit();
         }

@@ -28,7 +28,7 @@
  */
 
 import {
-    collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc,
+    collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
     query, where, limit as fsLimit, writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { firestore } from '../core/firebase.js';
@@ -194,6 +194,12 @@ class FirestoreAdmissionRepository {
     async importLegacyRecord(record) {
         const prepared = this.beforeSave({ ...record });
         this.validate(prepared);
+
+        // Preserve a backup/restore record's real id — other collections
+        // (students created from an enrolled application, notifications,
+        // …) may reference it. A genuine 1.0-migration record has no `id`
+        // at all, so that path is unaffected and still mints a fresh one.
+        const explicitId = prepared.id || null;
         delete prepared.id;
 
         const now = nowISO();
@@ -207,6 +213,11 @@ class FirestoreAdmissionRepository {
             deletedBy: record.deletedBy || null,
             searchKey: searchKeyOf(prepared)
         };
+
+        if (explicitId) {
+            await setDoc(doc(admissionsCollection, explicitId), full);
+            return { id: explicitId, ...full };
+        }
 
         const ref = await addDoc(admissionsCollection, full);
         return { id: ref.id, ...full };

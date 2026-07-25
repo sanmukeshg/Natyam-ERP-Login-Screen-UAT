@@ -256,8 +256,7 @@ class FirestoreLedgerRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(ledgerCollection), {
+                setBatch.set(doc(ledgerCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

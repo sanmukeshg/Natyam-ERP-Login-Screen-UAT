@@ -271,8 +271,7 @@ class FirestoreCurriculumRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(curriculaCollection), {
+                setBatch.set(doc(curriculaCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

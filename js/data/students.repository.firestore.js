@@ -25,7 +25,7 @@
  */
 
 import {
-    collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc,
+    collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
     query, where, limit as fsLimit, startAfter, writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { firestore } from '../core/firebase.js';
@@ -224,6 +224,16 @@ class FirestoreStudentRepository {
     async importLegacyRecord(record) {
         const prepared = this.beforeSave({ ...record });
         this.validate(prepared);
+
+        // A backup/restore record already has a real Firestore id from its
+        // own previous existence — every other collection's records that
+        // reference a student (attendance.studentId, invoices.studentId,
+        // batches' roster, …) point at that id, so it must be preserved,
+        // not regenerated, or the restore silently orphans every one of
+        // those references. A genuine 1.0-migration record has no `id` at
+        // all (legacy IndexedDB records never had one), so that path is
+        // unaffected and still mints a fresh one via addDoc().
+        const explicitId = prepared.id || null;
         delete prepared.id;
 
         // Only generate a fresh code if the source doesn't already carry
@@ -244,6 +254,11 @@ class FirestoreStudentRepository {
             deletedBy: record.deletedBy || null,
             searchKey: searchKeyOf(prepared)
         };
+
+        if (explicitId) {
+            await setDoc(doc(studentsCollection, explicitId), full);
+            return { id: explicitId, ...full };
+        }
 
         const ref = await addDoc(studentsCollection, full);
         return { id: ref.id, ...full };

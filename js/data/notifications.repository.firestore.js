@@ -187,8 +187,7 @@ class FirestoreNotificationRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(notificationsCollection), data);
+                setBatch.set(doc(notificationsCollection, id), data);
             }
             await setBatch.commit();
         }

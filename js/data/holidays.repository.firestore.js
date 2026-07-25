@@ -230,8 +230,7 @@ class FirestoreHolidayRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(holidaysCollection), {
+                setBatch.set(doc(holidaysCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });

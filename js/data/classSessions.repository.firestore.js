@@ -200,8 +200,7 @@ class FirestoreClassSessionRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(classSessionsCollection), data);
+                setBatch.set(doc(classSessionsCollection, id), data);
             }
             await setBatch.commit();
         }

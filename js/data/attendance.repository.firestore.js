@@ -188,8 +188,7 @@ class FirestoreAttendanceRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(attendanceCollection), data);
+                setBatch.set(doc(attendanceCollection, id), data);
             }
             await setBatch.commit();
         }

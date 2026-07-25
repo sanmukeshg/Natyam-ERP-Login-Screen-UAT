@@ -257,8 +257,7 @@ class FirestoreCertificateRepository {
             const setBatch = writeBatch(firestore);
             for (const record of chunk) {
                 const { id, ...data } = record;
-                void id;
-                setBatch.set(doc(certificatesCollection), {
+                setBatch.set(doc(certificatesCollection, id), {
                     ...data,
                     searchKey: searchKeyOf(data)
                 });
