@@ -18,9 +18,24 @@ import { db } from '../core/db.js';
 import { APP, SCHEMA, STORE_NAMES, CAPABILITIES } from '../config/app.config.js';
 import { nowISO, localDate, formatDateTime } from '../utils/date.js';
 import { downloadFile } from '../utils/dom.js';
-import { settings$, students$, admissions$ } from '../data/repositories.js';
+import {
+    settings$, students$, admissions$, attendance$, classSessions$, programs$, certificates$, batches$, staff$,
+    feePlans$, invoices$, payments$, ledger$, expenses$, salaries$,
+    documents$, drafts$, notifications$,
+    branches$, academicYears$, curricula$, curriculumLevels$, holidays$
+} from '../data/repositories.js';
 
 const FILE_KIND = 'natyam-erp-backup';
+
+// Sections with no IndexedDB history at all — `classSessions` (Milestone 7)
+// never existed as a local store the way Students/Admissions/Attendance did
+// before their own migrations, so it has no entry in SCHEMA/STORE_NAMES for
+// restore()'s recognition filter to match against on its own. Named here
+// explicitly so a backup's classSessions section isn't silently dropped as
+// "unrecognised," without inventing a fictional IndexedDB store declaration
+// purely to satisfy that filter. Future Firestore-only collections with no
+// IndexedDB precedent belong here too.
+const FIRESTORE_ONLY_SECTIONS = ['classSessions'];
 
 /* ==========================================================================
    EXPORT
@@ -44,14 +59,39 @@ export async function buildBackup({ note = null } = {}) {
     const exported = await db.exportAll();
     const data = exported.data;
 
-    // Students (Milestone 3) and Admissions (Milestone 5) moved to Cloud
-    // Firestore — db.exportAll() only sees IndexedDB, which no longer holds
-    // the real records for either. Overwrite those two sections with live
+    // Students (Milestone 3), Admissions (Milestone 5), Attendance
+    // (Milestone 6), Class Sessions (Milestone 7), Programmes (Milestone 17),
+    // Certificates (Milestone 18), Batches (Milestone 19), Staff
+    // (Milestone 20), Fee Collection + Finance (Milestone 21),
+    // Documents + Admission Drafts + Notifications (Milestone 22) and
+    // Settings reference data (Milestone 23) moved to Cloud Firestore —
+    // db.exportAll() only sees IndexedDB, which no longer holds the real
+    // records for any of these. Overwrite those sections with live
     // Firestore data so a backup taken today actually reflects today's
-    // students and applications, not a stale or empty local copy. Every
-    // other section is untouched — still IndexedDB.
+    // records, not a stale or empty local copy. The audit log is the one
+    // remaining section still on IndexedDB.
     data.students = await students$.all({ includeDeleted: true });
     data.admissions = await admissions$.all({ includeDeleted: true });
+    data.attendance = await attendance$.all();
+    data.classSessions = await classSessions$.all();
+    data.programs = await programs$.all({ includeDeleted: true });
+    data.certificates = await certificates$.all({ includeDeleted: true });
+    data.batches = await batches$.all({ includeDeleted: true });
+    data.staff = await staff$.all({ includeDeleted: true });
+    data.feePlans = await feePlans$.all({ includeDeleted: true });
+    data.invoices = await invoices$.all({ includeDeleted: true });
+    data.payments = await payments$.all({ includeDeleted: true });
+    data.ledgerEntries = await ledger$.all();
+    data.expenses = await expenses$.all({ includeDeleted: true });
+    data.salaries = await salaries$.all({ includeDeleted: true });
+    data.documents = await documents$.all({ includeDeleted: true });
+    data.admissionDrafts = await drafts$.all();
+    data.notifications = await notifications$.all();
+    data.branches = await branches$.all({ includeDeleted: true });
+    data.academicYears = await academicYears$.all({ includeDeleted: true });
+    data.curricula = await curricula$.all({ includeDeleted: true });
+    data.curriculumLevels = await curriculumLevels$.all({ includeDeleted: true });
+    data.holidays = await holidays$.all({ includeDeleted: true });
 
     const counts = Object.fromEntries(Object.entries(data).map(([store, rows]) => [store, rows.length]));
 
@@ -173,7 +213,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     }
 
     const known = Object.fromEntries(
-        Object.entries(backup.data).filter(([store]) => STORE_NAMES.includes(store))
+        Object.entries(backup.data).filter(([store]) => STORE_NAMES.includes(store) || FIRESTORE_ONLY_SECTIONS.includes(store))
     );
 
     // A restore that recognises nothing must not proceed. `importAll` with
@@ -187,15 +227,50 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         );
     }
 
-    // Students and Admissions moved to Cloud Firestore — restored separately
+    // Students, Admissions, Attendance, Class Sessions, Programmes,
+    // Certificates, Batches, Staff, Fee Plans, Invoices, Payments, Ledger
+    // Entries, Expenses, Salaries, Documents, Admission Drafts,
+    // Notifications, Branches, Academic Years, Curricula, Curriculum
+    // Levels and Holidays moved to Cloud Firestore — restored separately
     // from every other store. Left inside `known`, db.importAll() would
-    // silently write these sections to their now-orphaned local IndexedDB
-    // stores instead of anywhere the app can actually see them.
-    const { students: studentRows, admissions: admissionRows, ...indexedDbStores } = known;
+    // either silently write these sections to their now-orphaned local
+    // IndexedDB stores, or (for classSessions, which never had one) throw
+    // trying to write to a store that doesn't exist.
+    const {
+        students: studentRows, admissions: admissionRows, attendance: attendanceRows,
+        classSessions: classSessionRows, programs: programRows, certificates: certificateRows,
+        batches: batchRows, staff: staffRows,
+        feePlans: feePlanRows, invoices: invoiceRows, payments: paymentRows,
+        ledgerEntries: ledgerRows, expenses: expenseRows, salaries: salaryRows,
+        documents: documentRows, admissionDrafts: draftRows, notifications: notificationRows,
+        branches: branchRows, academicYears: academicYearRows, curricula: curriculumRows,
+        curriculumLevels: curriculumLevelRows, holidays: holidayRows,
+        ...indexedDbStores
+    } = known;
 
     await db.importAll(indexedDbStores, { mode: 'replace' });
     if (studentRows) await students$.replaceAll(studentRows);
     if (admissionRows) await admissions$.replaceAll(admissionRows);
+    if (attendanceRows) await attendance$.replaceAll(attendanceRows);
+    if (classSessionRows) await classSessions$.replaceAll(classSessionRows);
+    if (programRows) await programs$.replaceAll(programRows);
+    if (certificateRows) await certificates$.replaceAll(certificateRows);
+    if (batchRows) await batches$.replaceAll(batchRows);
+    if (staffRows) await staff$.replaceAll(staffRows);
+    if (feePlanRows) await feePlans$.replaceAll(feePlanRows);
+    if (invoiceRows) await invoices$.replaceAll(invoiceRows);
+    if (paymentRows) await payments$.replaceAll(paymentRows);
+    if (ledgerRows) await ledger$.replaceAll(ledgerRows);
+    if (expenseRows) await expenses$.replaceAll(expenseRows);
+    if (salaryRows) await salaries$.replaceAll(salaryRows);
+    if (documentRows) await documents$.replaceAll(documentRows);
+    if (draftRows) await drafts$.replaceAll(draftRows);
+    if (notificationRows) await notifications$.replaceAll(notificationRows);
+    if (branchRows) await branches$.replaceAll(branchRows);
+    if (academicYearRows) await academicYears$.replaceAll(academicYearRows);
+    if (curriculumRows) await curricula$.replaceAll(curriculumRows);
+    if (curriculumLevelRows) await curriculumLevels$.replaceAll(curriculumLevelRows);
+    if (holidayRows) await holidays$.replaceAll(holidayRows);
 
     await settings$.set('lastRestoreAt', nowISO());
 
@@ -203,9 +278,11 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     // selected branch id is meaningless if it no longer exists in the
     // restored data — left in storage, the next hydrate() would silently
     // land on an unrelated branch rather than "All branches". A selection
-    // that is still valid after the restore is left untouched.
+    // that is still valid after the restore is left untouched. Branches
+    // moved to Firestore (Milestone 23) and are destructured out of
+    // `known` above as `branchRows`, not left inside it — read from there.
     try {
-        const restoredBranchIds = new Set((known.branches || []).map((b) => b.id));
+        const restoredBranchIds = new Set((branchRows || []).map((b) => b.id));
         const stored = JSON.parse(localStorage.getItem('natyam.session') || '{}');
         if (stored.activeBranchId && !restoredBranchIds.has(stored.activeBranchId)) {
             delete stored.activeBranchId;

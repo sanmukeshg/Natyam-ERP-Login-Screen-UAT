@@ -117,22 +117,19 @@ export function validateApplication(data) {
    ========================================================================== */
 
 export async function saveDraft(draftId, data, { step = 0 } = {}) {
-    const id = draftId || uid('DRF');
-    const existing = draftId ? await drafts$.find(draftId) : null;
-
-    const draft = {
-        id,
+    const fields = {
         data,
         step,
         label: data.name?.trim() || 'Untitled application',
-        branchId: data.branchId || null,
-        createdAt: existing?.createdAt || nowISO(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
+        branchId: data.branchId || null
     };
 
-    await db.put('admissionDrafts', draft);
-    return draft;
+    if (draftId) {
+        const existing = await drafts$.find(draftId);
+        if (existing) return drafts$.update(draftId, fields);
+    }
+
+    return drafts$.create({ id: draftId || undefined, ...fields });
 }
 
 export async function listDrafts() {
@@ -146,7 +143,7 @@ export async function loadDraft(draftId) {
 }
 
 export async function discardDraft(draftId) {
-    await db.remove('admissionDrafts', draftId);
+    await drafts$.remove(draftId);
     return true;
 }
 

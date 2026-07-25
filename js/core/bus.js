@@ -103,13 +103,13 @@ export const EVENTS = Object.freeze({
     ADMISSION_ENROLLED: 'admission:enrolled',
 
     ATTENDANCE_SAVED:   'attendance:saved',
-    LEAVE_REQUESTED:    'attendance:leave-requested',
-    LEAVE_DECIDED:      'attendance:leave-decided',
-    HOLIDAY_CHANGED:    'attendance:holiday-changed',
 
     BATCH_CREATED:      'batch:created',
     BATCH_UPDATED:      'batch:updated',
     BATCH_CLOSED:       'batch:closed',
+
+    SESSION_POSTPONED:  'session:postponed',
+    SESSION_CANCELLED:  'session:cancelled',
 
     STAFF_CREATED:      'staff:created',
     STAFF_UPDATED:      'staff:updated',

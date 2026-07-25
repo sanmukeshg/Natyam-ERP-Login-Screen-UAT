@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.5.0',
+    version: '2.14.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -75,7 +75,6 @@ export const SCHEMA = Object.freeze({
         ]},
 
         holidays:       { keyPath: 'id', indexes: [['date', 'date'], ['branchId', 'branchId']] },
-        leaveRequests:  { keyPath: 'id', indexes: [['studentId', 'studentId'], ['status', 'status'], ['fromDate', 'fromDate']] },
 
         feePlans:       { keyPath: 'id', indexes: [['level', 'level'], ['status', 'status'], ['academicYearId', 'academicYearId']] },
 
@@ -339,12 +338,11 @@ export const ADMISSION_STATUS = Object.freeze({
     REJECTED:  'rejected'
 });
 
+/* NATYAM has no Leave concept and no Holiday-in-attendance handling
+   (Milestone 6) — attendance is recorded as one of exactly two states. */
 export const ATTENDANCE_STATUS = Object.freeze({
     PRESENT: 'present',
-    ABSENT:  'absent',
-    LATE:    'late',
-    EXCUSED: 'excused',
-    HOLIDAY: 'holiday'
+    ABSENT:  'absent'
 });
 
 /* Curriculum & academic structure (Phase 2). Curricula and curriculum levels
@@ -593,12 +591,10 @@ export const NAVIGATION = Object.freeze([
               load: () => import('../modules/batches/batches.page.js') },
             { path: '/timetable', label: 'Timetable', icon: 'calendar', cap: CAPABILITIES.STUDENT_VIEW,
               load: () => import('../modules/batches/timetable.page.js') },
-            // Reached from Timetable's "Take register" now, not its own
-            // sidebar link. `hidden` keeps the entry (and so the route — see
-            // ROUTES below, derived from this array) registered; only the
-            // rendered sidebar link (js/ui/shell.js paintNav) is skipped.
+            // Restored to the sidebar (Milestone 6) — still reachable from
+            // Timetable's "Take register" too, both routes to the same page.
             { path: '/attendance', label: 'Attendance', icon: 'check-square', cap: CAPABILITIES.ATTENDANCE_VIEW,
-              load: () => import('../modules/attendance/attendance.page.js'), hidden: true },
+              load: () => import('../modules/attendance/attendance.page.js') },
             { path: '/programs', label: 'Programmes', icon: 'star', cap: CAPABILITIES.PROGRAM_VIEW,
               load: () => import('../modules/programs/programs.page.js') },
             { path: '/certificates', label: 'Certificates', icon: 'award', cap: CAPABILITIES.PROGRAM_VIEW,

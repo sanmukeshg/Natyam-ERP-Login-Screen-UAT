@@ -314,7 +314,7 @@ export default class ProgramsPage extends Page {
                 ${program.status === PROGRAM_STATUS.CANCELLED ? html`
                     <div class="alert alert-warning">
                         <div class="alert-title">Cancelled</div>
-                        <p class="alert-body">${program.cancellationReason || 'No reason recorded.'}</p>
+                        <p class="alert-body">${program.cancelReason || 'No reason recorded.'}</p>
                     </div>
                 ` : ''}
 
@@ -339,7 +339,7 @@ export default class ProgramsPage extends Page {
                             ['Attendees', program.attendees],
                             ['Income', program.income ? formatMoney(program.income) : null],
                             ['Expenditure', program.expenditure ? formatMoney(program.expenditure) : null],
-                            ['Notes', program.completionNotes]
+                            ['Notes', program.notes]
                         ] : [])
                     ])}
                 </div></div>

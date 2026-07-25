@@ -6,51 +6,31 @@
  * emits an event that finance listens to; it never decides how the school's
  * books are structured.
  *
- * Every write that touches money is a single `db.unit()` — the invoice, the
- * payment row, the ledger entry and the sequence counter either all land or
- * none of them do. 1.0 wrote them as separate `put()` calls, which meant a
- * quota error between the second and third silently left an invoice marked
- * paid with no receipt behind it and no ledger income.
+ * Every write that touches money is atomic — the invoice, the payment row
+ * and the ledger entry either all land or none do. 1.0 wrote them as
+ * separate calls, which meant a failure between the second and third
+ * silently left an invoice marked paid with no receipt behind it and no
+ * ledger income. Milestone 21 moved this from a single IndexedDB
+ * `db.unit()` to a Firestore transaction — the mechanics now live in
+ * `postPayment()`/`postRefund()` (js/data/ledger.repository.firestore.js,
+ * re-exported from repositories.js), since Firestore SDK access is
+ * reserved to the repository layer. This service still owns every
+ * validation decision; the sequence counter (still IndexedDB, via
+ * `settings$.nextSequence()`) is still allocated before the transaction
+ * starts, for the same reason as before — nesting it inside would deadlock
+ * the settings store against itself.
  */
 
-import { db, request } from '../core/db.js';
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { uid, sequenceNumber } from '../utils/id.js';
-import { localDate, nowISO, addDays, monthKey, academicYearOf } from '../utils/date.js';
-import { auditRow } from './audit.service.js';
+import { sequenceNumber } from '../utils/id.js';
+import { localDate, addDays, academicYearOf } from '../utils/date.js';
 import {
     INVOICE_STATUS, PAYMENT_STATUS, PAYMENT_MODES, STUDENT_STATUS, feeFrequency
 } from '../config/app.config.js';
 import {
-    invoices$, payments$, students$, feePlans$, settings$
+    invoices$, payments$, students$, feePlans$, settings$, reconcile, postPayment, postRefund
 } from '../data/repositories.js';
-
-/* ==========================================================================
-   STATUS DERIVATION
-   One function decides an invoice's status from its numbers. Nothing else in
-   the codebase is allowed to set `status` on an invoice by hand — that is how
-   1.0 ended up with invoices marked "paid" carrying a non-zero balance.
-   ========================================================================== */
-
-export function deriveInvoiceStatus(invoice) {
-    if (invoice.status === INVOICE_STATUS.CANCELLED) return INVOICE_STATUS.CANCELLED;
-    if (invoice.status === INVOICE_STATUS.WAIVED) return INVOICE_STATUS.WAIVED;
-    if (invoice.status === INVOICE_STATUS.DRAFT) return INVOICE_STATUS.DRAFT;
-
-    const balance = Math.max(0, (invoice.amount || 0) - (invoice.paidAmount || 0));
-    if (balance === 0) return INVOICE_STATUS.PAID;
-    if ((invoice.paidAmount || 0) > 0) return INVOICE_STATUS.PARTIAL;
-    return invoice.dueDate < localDate() ? INVOICE_STATUS.OVERDUE : INVOICE_STATUS.OPEN;
-}
-
-/** Recomputes amounts and status together, so they cannot disagree. */
-function reconcile(invoice) {
-    const paidAmount = Math.max(0, Math.round(invoice.paidAmount || 0));
-    const amount = Math.round(invoice.amount || 0);
-    const next = { ...invoice, amount, paidAmount, balance: Math.max(0, amount - paidAmount) };
-    return { ...next, status: deriveInvoiceStatus(next) };
-}
 
 /* ==========================================================================
    BILLING
@@ -323,8 +303,7 @@ export async function createInvoice({ studentId, branchId, feePlanId = null, amo
     const year = academicYearOf().start;
     const seq = await settings$.nextSequence('invoice');
 
-    const invoice = reconcile({
-        id: uid('INV'),
+    const candidate = reconcile({
         number: sequenceNumber('NAT/INV', year, seq),
         studentId: student.id,
         studentName: student.name,
@@ -339,15 +318,10 @@ export async function createInvoice({ studentId, branchId, feePlanId = null, amo
         paidAmount: 0,
         dueDate,
         issuedOn: localDate(),
-        status: INVOICE_STATUS.OPEN,
-        createdAt: nowISO(),
-        createdBy: session.actorId(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId(),
-        deletedAt: null
+        status: INVOICE_STATUS.OPEN
     });
 
-    await db.put('invoices', invoice);
+    const invoice = await invoices$.create(candidate);
     bus.emit(EVENTS.INVOICE_CREATED, { invoice });
     return invoice;
 }
@@ -393,61 +367,17 @@ export async function recordPayment({ invoiceId, amount, mode, reference = null,
     const seq = await settings$.nextSequence('receipt');
     const receiptNo = sequenceNumber('NAT/RCP', year, seq);
 
-    const payment = {
-        id: uid('PAY'),
-        receiptNo,
+    const { payment, invoice: nextInvoice, ledgerEntry } = await postPayment({
         invoiceId: invoice.id,
-        invoiceNumber: invoice.number,
-        studentId: invoice.studentId,
-        studentName: invoice.studentName,
-        branchId: invoice.branchId,
         amount: value,
         mode,
         reference: reference?.trim() || null,
         note: note?.trim() || null,
         paidOn: date,
-        status: PAYMENT_STATUS.CLEARED,
-        collectedBy: session.actorId(),
-        collectedByName: session.actorName(),
-        createdAt: nowISO(),
-        createdBy: session.actorId(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId(),
-        deletedAt: null
-    };
-
-    const nextInvoice = reconcile({
-        ...invoice,
-        paidAmount: (invoice.paidAmount || 0) + value,
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
+        receiptNo,
+        actor: session.actorId(),
+        actorName: session.actorName()
     });
-
-    const ledgerEntry = {
-        id: uid('LDG'),
-        branchId: invoice.branchId,
-        date,
-        period: monthKey(date),
-        account: 'Tuition fees',
-        type: 'income',
-        amount: value,
-        narration: `${invoice.studentName} — receipt ${receiptNo}`,
-        sourceType: 'payment',
-        sourceId: payment.id,
-        createdAt: nowISO(),
-        createdBy: session.actorId(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    };
-
-    await db.unit(['invoices', 'payments', 'ledgerEntries', 'auditLog'], async (s) => {
-        await request(s.invoices.put(nextInvoice));
-        await request(s.payments.put(payment));
-        await request(s.ledgerEntries.put(ledgerEntry));
-        await request(s.auditLog.put(auditRow('Payment', payment.id, 'create', {
-            receiptNo, amount: value, invoice: invoice.number
-        })));
-    }, 'fee:payment');
 
     bus.emit(EVENTS.PAYMENT_RECORDED, { payment, invoice: nextInvoice });
     bus.emit(EVENTS.LEDGER_POSTED, { entry: ledgerEntry });
@@ -468,48 +398,13 @@ export async function refundPayment(paymentId, { reason, refundedOn = null }) {
     if (!reason?.trim()) throw new Error('A refund needs a reason.');
 
     const date = refundedOn || localDate();
-    const invoice = await invoices$.find(payment.invoiceId);
 
-    const nextPayment = {
-        ...payment,
-        status: PAYMENT_STATUS.REFUNDED,
+    const { payment: nextPayment, invoice: nextInvoice } = await postRefund({
+        paymentId,
+        reason: reason.trim(),
         refundedOn: date,
-        refundReason: reason.trim(),
-        refundedBy: session.actorId(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    };
-
-    const nextInvoice = invoice ? reconcile({
-        ...invoice,
-        paidAmount: Math.max(0, (invoice.paidAmount || 0) - payment.amount),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    }) : null;
-
-    const contra = {
-        id: uid('LDG'),
-        branchId: payment.branchId,
-        date,
-        period: monthKey(date),
-        account: 'Tuition fees',
-        type: 'expense',
-        amount: payment.amount,
-        narration: `Refund of receipt ${payment.receiptNo} — ${reason.trim()}`,
-        sourceType: 'refund',
-        sourceId: payment.id,
-        createdAt: nowISO(),
-        createdBy: session.actorId(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    };
-
-    await db.unit(['invoices', 'payments', 'ledgerEntries', 'auditLog'], async (s) => {
-        await request(s.payments.put(nextPayment));
-        if (nextInvoice) await request(s.invoices.put(nextInvoice));
-        await request(s.ledgerEntries.put(contra));
-        await request(s.auditLog.put(auditRow('Payment', payment.id, 'refund', { reason: reason.trim(), amount: payment.amount })));
-    }, 'fee:refund');
+        actor: session.actorId()
+    });
 
     bus.emit(EVENTS.PAYMENT_REFUNDED, { payment: nextPayment, invoice: nextInvoice });
     return { payment: nextPayment, invoice: nextInvoice };
@@ -528,24 +423,14 @@ export async function waiveInvoice(invoiceId, { reason }) {
     if (invoice.status === INVOICE_STATUS.PAID) throw new Error('This invoice is already paid in full.');
     if (invoice.status === INVOICE_STATUS.CANCELLED) throw new Error('This invoice was cancelled.');
 
-    const next = {
-        ...invoice,
+    return invoices$.update(invoiceId, {
         status: INVOICE_STATUS.WAIVED,
         waivedAmount: invoice.balance,
         waiverReason: reason.trim(),
         waivedOn: localDate(),
         waivedBy: session.actorId(),
-        balance: 0,
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    };
-
-    await db.unit(['invoices', 'auditLog'], async (s) => {
-        await request(s.invoices.put(next));
-        await request(s.auditLog.put(auditRow('Invoice', invoice.id, 'waive', { amount: invoice.balance, reason: reason.trim() })));
-    }, 'fee:waive');
-
-    return next;
+        balance: 0
+    });
 }
 
 /** Cancels an unpaid invoice raised in error. Paid invoices must be refunded. */
@@ -558,20 +443,12 @@ export async function cancelInvoice(invoiceId, { reason }) {
     }
     if (!reason?.trim()) throw new Error('Say why this invoice is being cancelled.');
 
-    const next = {
-        ...invoice,
+    return invoices$.update(invoiceId, {
         status: INVOICE_STATUS.CANCELLED,
         balance: 0,
         cancelReason: reason.trim(),
-        cancelledOn: localDate(),
-        updatedAt: nowISO(),
-        updatedBy: session.actorId()
-    };
-
-    await db.unit(['invoices', 'auditLog'], async (s) => {
-        await request(s.invoices.put(next));
-        await request(s.auditLog.put(auditRow('Invoice', invoice.id, 'cancel', { reason: reason.trim() })));
-    }, 'fee:cancel');
+        cancelledOn: localDate()
+    });
 
     return next;
 }
@@ -589,9 +466,10 @@ export async function sweepOverdue() {
     const stale = await invoices$.needingOverdueSweep();
     if (!stale.length) return 0;
 
-    const updated = stale.map((i) => ({ ...i, status: INVOICE_STATUS.OVERDUE }));
-    await db.putMany('invoices', updated);
-    return updated.length;
+    for (const invoice of stale) {
+        await invoices$.update(invoice.id, { status: INVOICE_STATUS.OVERDUE });
+    }
+    return stale.length;
 }
 
 /** The complete fee position for one student, as the profile page shows it. */

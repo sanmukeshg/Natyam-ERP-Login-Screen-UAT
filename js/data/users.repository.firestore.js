@@ -151,11 +151,8 @@ class FirestoreUserRepository {
      *   "contact your administrator" rejection.
      */
     async bootstrapAdministrator(data) {
-        this.validate(data);
         const id = emailId(data.email);
         const at = nowISO();
-        const flagRef = doc(firestore, 'meta', 'bootstrapped');
-        const userRef = doc(firestore, COLLECTION_NAME, id);
 
         const record = {
             ...data,
@@ -169,6 +166,17 @@ class FirestoreUserRepository {
             deletedAt: null
         };
         delete record.id;
+
+        // Validated against the fully-assembled record, not the raw input —
+        // `role` is assigned above, internally, never supplied by the caller
+        // (unlike create(), where the caller picks a role and validating the
+        // raw input first is correct). Validating too early here made this
+        // check ("Choose a role.") fail on every bootstrap attempt, since
+        // the input never carries a role at all.
+        this.validate(record);
+
+        const flagRef = doc(firestore, 'meta', 'bootstrapped');
+        const userRef = doc(firestore, COLLECTION_NAME, id);
 
         await runTransaction(firestore, async (tx) => {
             const flagSnap = await tx.get(flagRef);

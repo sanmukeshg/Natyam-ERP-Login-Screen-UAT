@@ -215,7 +215,21 @@ function registerRoutes() {
  * @param {object} user  The provisioned Firestore user record (see auth.service.js).
  */
 async function hydrateSession(user) {
-    const branches = await branches$.active();
+    // Isolated from resolveProvisionedUser()'s own failure mode on purpose.
+    // handleAuthStateChange()'s outer catch treats any error here as "not
+    // provisioned, inactive, or archived" and signs the person back out —
+    // correct for a real provisioning rejection, wrong for a branches read
+    // that merely failed (a permission-denied mid-rules-propagation, a
+    // dropped connection). `user` is already known-good at this point; the
+    // person should see the app, degraded, and be told what happened —
+    // not be bounced to the login screen with a misleading message.
+    let branches = [];
+    try {
+        branches = await branches$.active();
+    } catch (err) {
+        console.error('Could not load branches at sign-in', err);
+        toast.error(`Could not load your branches — ${err.message}. Reload to try again.`);
+    }
 
     // session.hydrate remembers the previously selected branch itself, so no
     // branch id is passed here — passing one would override the user's choice

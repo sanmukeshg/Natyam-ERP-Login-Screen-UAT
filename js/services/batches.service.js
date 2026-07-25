@@ -18,6 +18,7 @@ import { localDate, dayName, addDays, startOfWeek } from '../utils/date.js';
 import { LEVELS, levelLabel } from '../config/app.config.js';
 import { batches$, students$, staff$, attendance$, branches$, AttendanceMath } from '../data/repositories.js';
 import { markedSessions } from './attendance.service.js';
+import { sessionMap } from './session.service.js';
 
 export const WEEK = Object.freeze(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 
@@ -253,10 +254,19 @@ export async function batchDetail(id) {
  * The week's timetable, grouped by day and sorted by start time. This is the
  * view that makes a double-booking obvious at a glance, which is why it exists
  * as well as the conflict check.
+ *
+ * Milestone 7: also reflects each day's Timetable Session where one exists —
+ * a Postponed or Cancelled status is shown rather than a plain recurring
+ * slot, and a Replacement session appears on its own real date even when
+ * that date isn't one of the batch's normal recurring days. This is a pure
+ * read: looking at the timetable never creates a session (sessionMap() is
+ * read-only) — only opening/marking a register, or an explicit postpone/
+ * cancel action, does that.
  */
 export async function timetable(branchId = null) {
     const [batches, teachers] = await Promise.all([batches$.active(branchId), staff$.teachers()]);
     const teacherName = new Map(teachers.map((t) => [t.id, t.name]));
+    const byId = new Map(batches.map((b) => [b.id, b]));
 
     // Each day column stands for a real calendar date within *this* week
     // (Monday-anchored, matching the Indian school week) — used below to look
@@ -267,22 +277,57 @@ export async function timetable(branchId = null) {
     // marked for a future date) could never match it.
     const weekStart = startOfWeek();
     const days = WEEK.map((day, i) => ({ day, date: addDays(weekStart, i) }));
-    const markedSet = await markedSessions(days[0].date, days[days.length - 1].date, branchId);
+    const weekEnd = days[days.length - 1].date;
+    const [markedSet, sessions] = await Promise.all([
+        markedSessions(days[0].date, weekEnd, branchId),
+        sessionMap(days[0].date, weekEnd, branchId)
+    ]);
 
-    return days.map(({ day, date }) => ({
-        day,
-        label: dayName(date),
-        sessions: batches
-            .filter((b) => (b.days || []).includes(day))
-            .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
-            .map((b) => ({
+    return days.map(({ day, date }) => {
+        // Batches that normally recur this day.
+        const recurring = batches.filter((b) => (b.days || []).includes(day));
+
+        // A session explicitly recorded on this exact date whose batch
+        // isn't already one of the recurring ones above — a Replacement
+        // session sitting on an otherwise non-recurring day is exactly
+        // this case, and it still needs to appear on the day it actually
+        // falls on.
+        const extra = [...sessions.values()]
+            .filter((s) => s.date === date && !recurring.some((b) => b.id === s.batchId))
+            .map((s) => byId.get(s.batchId))
+            .filter(Boolean);
+
+        const slots = [...recurring, ...extra].map((b) => {
+            const classSession = sessions.get(`${b.id}|${date}`);
+            // A Replacement session can carry its own time and teacher,
+            // different from the batch's usual schedule — that's the
+            // whole point of postponing to it. Fall back to the batch's
+            // normal values for an ordinary, untouched occurrence.
+            const startTime = classSession?.startTime || b.startTime;
+            const endTime = classSession?.endTime || b.endTime;
+            const teacherId = classSession?.teacherId || b.teacherId;
+
+            return {
                 ...b,
                 date,
-                teacherName: teacherName.get(b.teacherId) || 'Unassigned',
+                startTime,
+                endTime,
+                teacherId,
+                teacherName: teacherName.get(teacherId) || 'Unassigned',
                 levelLabel: levelLabel(b.level),
-                registerMarked: markedSet.has(`${b.id}|${date}`)
-            }))
-    }));
+                registerMarked: markedSet.has(`${b.id}|${date}`),
+                sessionId: classSession?.id || null,
+                sessionStatus: classSession?.status || 'scheduled',
+                replacementSessionId: classSession?.replacementSessionId || null
+            };
+        });
+
+        return {
+            day,
+            label: dayName(date),
+            sessions: slots.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+        };
+    });
 }
 
 /** A teacher's own week — the teacher dashboard's schedule panel. */

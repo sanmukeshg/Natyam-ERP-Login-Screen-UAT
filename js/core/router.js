@@ -19,7 +19,7 @@
 
 import { bus, EVENTS } from './bus.js';
 import { session } from './session.js';
-import { html, render } from '../utils/dom.js';
+import { html, render, raw } from '../utils/dom.js';
 import { icon } from '../ui/icons.js';
 import { expireSession } from '../services/auth.service.js';
 import { users$ } from '../data/repositories.js';
@@ -242,7 +242,7 @@ class Router {
             <div class="page-body">
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${icon('compass')}</div>
+                        <div class="empty-glyph">${raw(icon('compass'))}</div>
                         <h2 class="empty-title">There is no page at ${path}</h2>
                         <p class="empty-text">The link may be from an older version of Natyam ERP,
                         or the record it pointed to has been removed.</p>
@@ -260,7 +260,7 @@ class Router {
             <div class="page-body">
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${icon('lock')}</div>
+                        <div class="empty-glyph">${raw(icon('lock'))}</div>
                         <h2 class="empty-title">${route.title || 'This module'} is not available to your role</h2>
                         <p class="empty-text">You are signed in as ${session.roleLabel()}.
                         An Administrator can grant access in Settings → Roles.</p>
@@ -278,7 +278,7 @@ class Router {
             <div class="page-body">
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${icon('cloud-off')}</div>
+                        <div class="empty-glyph">${raw(icon('cloud-off'))}</div>
                         <h2 class="empty-title">This module could not be loaded</h2>
                         <p class="empty-text">Natyam ERP loads each module the first time you open it.
                         This one did not arrive — usually because the app files are still downloading,
@@ -299,7 +299,7 @@ class Router {
             <div class="page-body">
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${icon('alert-triangle')}</div>
+                        <div class="empty-glyph">${raw(icon('alert-triangle'))}</div>
                         <h2 class="empty-title">This page hit an error</h2>
                         <p class="empty-text">Your data is unaffected — nothing was written.</p>
                         <p class="type-mono type-caption">${err.message}</p>

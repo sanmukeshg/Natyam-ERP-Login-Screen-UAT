@@ -286,7 +286,7 @@ export default class CertificatesPage extends Page {
                 ${row.status === 'revoked' ? html`
                     <div class="alert alert-danger">
                         <div class="alert-title">Revoked</div>
-                        <p class="alert-body">${row.revocationReason || 'No reason recorded.'}</p>
+                        <p class="alert-body">${row.revokeReason || 'No reason recorded.'}</p>
                     </div>
                 ` : ''}
 
@@ -371,18 +371,8 @@ export default class CertificatesPage extends Page {
             intro: 'Enter the serial printed on the certificate.',
             fields: [{ name: 'serial', label: 'Serial', required: true, placeholder: 'NAT/CRT/26/0031' }],
             onSubmit: async (values, helpers) => {
-                const found = await verify(values.serial.trim());
-
-                if (!found) {
-                    helpers.banner('No certificate carries that serial. It was not issued by this school.');
-                    return false;
-                }
-
-                helpers.banner(
-                    found.status === 'revoked'
-                        ? `Genuine, but revoked — ${found.studentName}, ${found.templateName}. ${found.revocationReason || ''}`
-                        : `Genuine — ${found.studentName}, ${found.templateName}, issued ${formatDateLong(found.issuedOn)}.`
-                );
+                const result = await verify(values.serial.trim());
+                helpers.banner(result.message);
                 return false;
             }
         });

@@ -76,7 +76,6 @@ export const REPORTS = Object.freeze([
             { key: 'batchName', label: 'Batch' },
             { key: 'present', label: 'Present', align: 'right' },
             { key: 'absent', label: 'Absent', align: 'right' },
-            { key: 'excused', label: 'Excused', align: 'right' },
             { key: 'sessions', label: 'Sessions', align: 'right' },
             { key: 'rate', label: 'Attendance', align: 'right', format: (v) => (v === null ? '—' : `${v}%`) }
         ],
@@ -387,10 +386,9 @@ async function buildAttendanceRegister({ from, to, branchId, batchId }) {
                 admissionNo: student.admissionNo,
                 name: student.name,
                 batchName: batchName.get(student.batchId) || 'Not placed',
-                present: (breakdown[ATTENDANCE_STATUS.PRESENT] || 0) + (breakdown[ATTENDANCE_STATUS.LATE] || 0),
+                present: breakdown[ATTENDANCE_STATUS.PRESENT] || 0,
                 absent: breakdown[ATTENDANCE_STATUS.ABSENT] || 0,
-                excused: breakdown[ATTENDANCE_STATUS.EXCUSED] || 0,
-                sessions: own.filter((r) => r.status !== ATTENDANCE_STATUS.HOLIDAY).length,
+                sessions: own.length,
                 rate: AttendanceMath.rateOf(own)
             };
         })

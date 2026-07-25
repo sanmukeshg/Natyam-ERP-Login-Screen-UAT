@@ -39,7 +39,6 @@ import { listBatches } from '../../services/batches.service.js';
 import { listFeePlans, listBranches } from '../../services/settings.service.js';
 import { listCurricula } from '../../services/curriculum.service.js';
 import { historyOf, describe as describeAudit } from '../../services/audit.service.js';
-import { requestLeave } from '../../services/attendance.service.js';
 
 const FEE_BADGE = { clear: 'badge-success', due: 'badge-warning', overdue: 'badge-danger' };
 const STATUS_BADGE = {
@@ -559,7 +558,6 @@ export default class StudentsPage extends Page {
                                 ${data.student.batchId ? 'Move batch' : 'Place in batch'}</button>
                             ${session.can('fee.collect')
                                 ? html`<button class="btn btn-sm btn-ghost" data-profile-action="collect">Collect fee</button>` : ''}
-                            <button class="btn btn-sm btn-ghost" data-profile-action="leave">Record leave</button>
                             <button class="btn btn-sm btn-ghost" data-profile-action="promote">Promote a level</button>
                             <button class="btn btn-sm btn-ghost" data-profile-action="status">Change status</button>
                             <button class="btn btn-sm btn-ghost" data-profile-action="certificate">Issue certificate</button>
@@ -628,8 +626,6 @@ export default class StudentsPage extends Page {
                     return router.go(`/fees?student=${student.id}&collect=1`);
                 case 'certificate':
                     return router.go(`/certificates?student=${student.id}&issue=1`);
-                case 'leave':
-                    return await this.recordLeave(student);
                 case 'promote':
                     return await this.promoteStudent(student);
                 case 'status':
@@ -647,22 +643,6 @@ export default class StudentsPage extends Page {
             toast.error(err.message);
             return undefined;
         }
-    }
-
-    async recordLeave(student) {
-        const done = await formOverlay({
-            title: `Leave for ${student.name}`,
-            variant: 'modal',
-            size: 'sm',
-            submitLabel: 'Request leave',
-            fields: [
-                { name: 'fromDate', label: 'From', type: 'date', required: true, width: 'half', value: localDate() },
-                { name: 'toDate', label: 'To', type: 'date', required: true, width: 'half', value: localDate() },
-                { name: 'reason', label: 'Reason', type: 'textarea', required: true, rows: 2 }
-            ],
-            onSubmit: async (values) => requestLeave({ studentId: student.id, ...values })
-        });
-        if (done) toast.success('Leave recorded. Approve it from the attendance screen.');
     }
 
     async promoteStudent(student) {

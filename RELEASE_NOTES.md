@@ -1,136 +1,111 @@
-# Release Notes — NATYAM ERP v2.5.0
+# Release Notes — NATYAM ERP v2.14.0
 
-**Release:** Admissions Migration to Cloud Firestore
-**Date:** 24 July 2026
-**Baseline:** v2.4.1
-**Type:** Data-layer migration for one module only. Every screen, workflow
-and field you already know stays exactly as it is — only where application
-records live underneath changed. Every other module (Attendance, Fees,
-Finance, Batches, Reports, Dashboard) is untouched, still on this browser's
-local database.
+**Release:** Settings Reference Data Migration & Completion
+**Date:** 25 July 2026
+**Baseline:** v2.13.0
+**Type:** Data-layer migration for five modules, plus two correctness
+fixes and one boot-time reliability fix found during review. No redesign
+of branch, academic year, curriculum, level, or holiday management.
 
 ---
 
 ## What changed for the academy
 
-### Applications now live in the cloud, not just this browser
+### Branches, academic years, curriculum and holidays now live in the cloud
 
-Until now, every admission application lived only in the local database of
-whichever browser created it. That's now moved to Cloud Firestore — the
-same cloud service Sign-In and Students already use — so application
-records are no longer tied to one device. Nothing about how you take an
-application, review it, approve it, or enrol it has changed; only where
-the record is actually stored.
+Branches, academic years, the curriculum structure, curriculum levels,
+and holidays now live in Cloud Firestore instead of just this browser's
+local storage. Nothing about how you create or edit a branch, set the
+current academic year, or manage the curriculum has changed; only where
+the record is actually stored. This is the module every other screen in
+the app leans on — branch names, the branch switcher, and academic-year
+context appear almost everywhere — so this release closes out the last
+IndexedDB dependency across nearly the whole application.
 
-### Application numbers are unchanged
+### Two duplicate-code protections that were quietly relying on this browser
 
-Every application still gets the same `NAT/APP/26/0007`-style application
-number, generated exactly the same way as before. Nothing about this
-numbering changed.
+Two branches — or two curricula — could never share the same code before,
+but that protection lived only in this browser's local database, not in
+the application itself. It now checks explicitly and tells you clearly if
+a code is already in use, the same protection your team already relies on
+for Batches and Staff.
 
-### Existing applications don't have to be typed back in
+### A sign-in reliability improvement
 
-Cloud Firestore starts empty — it isn't a copy of whatever applications
-already existed locally. A one-time migration tool now exists to carry
-real, existing application records across instead of re-entering them by
-hand. It's deliberately not part of the normal app — no button, no menu —
-it's run once, by hand, from the browser DevTools console on the device
-that holds the real data. See `docs/migrations/ADMISSIONS_DATA_MIGRATION.md`
-for exactly how, including a safe "preview first, write nothing" mode.
-
-### One thing that quietly wrote around the system is now fixed
-
-Enrolling an approved application used to close it out in a way that
-skipped some of the app's own bookkeeping. It never caused a visible
-problem — but it needed a real fix as part of this move, since otherwise
-it would have kept writing to the *old*, now-disconnected local storage
-instead of the application records everyone can actually see. It's fixed;
-it didn't change what it does, only how it saves it.
+If your branch list ever failed to load for a moment — a slow connection,
+for instance — the app used to sign you back out and show a confusing
+"not able to sign in" message, even though your account was perfectly
+fine. It now shows the app with a clear note that branches couldn't load,
+rather than locking you out.
 
 ---
 
 ## For administrators / IT
 
-- **`firestore.rules` must be republished** before this release works —
-  it now also covers the `admissions` collection. Firebase Console →
-  Firestore Database → Rules → paste the current file → Publish.
-- **No other module changed.** Attendance, Fees, Finance, Batches,
-  Timetable, Reports, Dashboard all continue to read and write this
-  browser's local database exactly as before.
-- **No data migrated automatically.** Cloud Firestore's admissions
-  collection starts empty on its own — this release does not copy
-  anything by itself. If real application records exist locally from
-  before this release, run the one-time migration utility
-  (`docs/migrations/ADMISSIONS_DATA_MIGRATION.md`) from the device that
-  holds them, rather than re-entering them by hand.
-- **If you're also migrating Students' historical data**, run the
-  Students migration first — a handful of enrolled applications carry a
-  reference to the student they became, which is only meaningful once
-  that student already exists in Firestore. Nothing in the app currently
-  reads that reference back, so this only matters if you're relying on
-  it for your own records.
-- **A trade-off worth knowing about:** enrolling an application used to
-  involve a database write that could partially fail in a specific,
-  narrow way (the same trade-off already disclosed in the v2.4.0 release
-  notes for Students). That hasn't gotten better or worse in this
-  release — see `docs/migrations/ADMISSIONS_MODULE_MIGRATION.md` for the
-  specifics.
+- **`firestore.rules` must be republished** — it now also covers
+  `branches`, `academicYears`, `curricula`, `curriculumLevels`, and
+  `holidays`. Firebase Console → Firestore Database → Rules → paste the
+  current file → Publish.
+- **No other module changed.** Students, Admissions, Attendance, Class
+  Sessions, Programmes, Certificates, Batches, Staff, Fee Collection,
+  Finance, Documents, Admission Drafts, Notifications, Reports, Dashboard
+  all continue exactly as before.
+- **No data migrated automatically.** These five Firestore collections
+  start empty unless already populated by an earlier restore — including
+  your branch list. **Publish the rules and restore your data before
+  relying on this release**, or the branch switcher and academic-year
+  context will be empty.
+- **Who can manage these settings is unchanged** — Administrator only,
+  exactly as before; the new Firestore rules enforce server-side what the
+  app already enforced in the interface. Every role can still read branch,
+  year, curriculum, and holiday data.
 
 ## Quality
 
 - Static analysis clean: no import cycles, all imports resolve, no
-  undefined identifiers.
-- Every existing caller of the Admissions repository (`admissions.
-  service.js`, and the reports/dashboard/analytics/notifications/search
-  screens that read from it) confirmed unchanged — the repository swap
-  underneath is invisible to all of them, apart from the one repository-
-  bypass fix described above.
-- Login and the rest of the app still load with no console errors.
+  undefined identifiers (113 modules).
+- Every existing caller of these five repositories (the sign-in path,
+  Settings, the branch switcher, Reports, Dashboard, Batches, Programmes,
+  Finance, Admissions, Students) confirmed unchanged and loads cleanly.
+- All 22 repository files (including all five new ones) load and execute
+  in the browser with zero console errors, and the sign-in boot sequence
+  — which now includes the reliability fix — runs cleanly end to end.
 
-**Not verifiable from this environment:** actually submitting, reviewing,
-approving, rejecting, reopening, or enrolling a real application against
+**Not verifiable from this environment:** actually creating a branch,
+changing the current academic year, or editing the curriculum against
 Firestore requires being signed in with a real Google account in a real
-browser — this automated environment can load and inspect the code, but
-cannot complete that sign-in. The manual checklist below is what's
-actually unverified and needs a real pass.
+browser. The manual checklist below is what needs a real pass.
 
 ## Manual UAT checklist
 
-- [ ] Publish the current `firestore.rules` (now including `admissions`)
-      before testing anything else below.
-- [ ] If real local admission data exists, run the migration utility's
-      dry run (`docs/migrations/ADMISSIONS_DATA_MIGRATION.md`) and confirm
-      the report's numbers look right before running it for real.
-- [ ] Submit a new application through the wizard — gets an
-      `applicationNo`, appears in the pipeline as "Awaiting review".
-- [ ] Begin review, approve it, then enrol it into a batch — a student is
-      created, the application shows as "Enrolled", both are correct.
-- [ ] Reject an application, then reopen it — both work.
-- [ ] Submit a second application with the same name and guardian phone as
-      an existing one — the duplicate warning appears.
-- [ ] Filter the applications list by branch and by stage — each filters
-      correctly.
-- [ ] As a Viewer-role account, confirm you can see the applications list
-      but cannot submit, approve, or enrol.
-- [ ] As an Owner & Accountant account, confirm you can approve/reject/
-      reopen but cannot submit a new application (no `admission.edit`).
-- [ ] Confirm the Dashboard's admissions panel, Reports' admissions
-      breakdown, and global Search still show application data correctly.
-- [ ] Confirm every other module (Students, Attendance, Fees, Batches)
-      still loads and behaves exactly as before.
+- [ ] Publish the current `firestore.rules` (now including `branches`,
+      `academicYears`, `curricula`, `curriculumLevels`, `holidays`) before
+      testing anything else below.
+- [ ] Confirm the branch switcher in the top navigation still shows your
+      branches correctly, and sign-in still works normally.
+- [ ] Create a new branch, then attempt to create another with the same
+      code — confirm a clear "already exists" error.
+- [ ] Edit a branch's code to clash with another branch's — confirm the
+      same clear error (this path had no protection at all before).
+- [ ] Close a branch.
+- [ ] Add a new academic year, then set it as the current year — confirm
+      only one year shows as current afterward.
+- [ ] Add a curriculum, then attempt a duplicate code — confirm the error.
+      Edit an existing curriculum's structure.
+- [ ] Confirm the Dashboard's holiday banner (if any holidays are on
+      record) still displays correctly.
+- [ ] As a non-Administrator account, confirm you can see branches,
+      academic years, and curriculum but cannot create or edit any of
+      them.
 
 ## Known issues
 
-- No data migration: any real application data entered before this
-  release stays in the old local-only storage and will not appear after
-  upgrading (see "For administrators / IT" above).
-- The atomicity trade-off for `enrolApplicant()` described above —
-  accepted, not hidden, documented in full in
-  `docs/migrations/ADMISSIONS_MODULE_MIGRATION.md` §9.
+None introduced by this release. See v2.4.0's through v2.13.0's release
+notes for trade-offs carried forward from earlier migrations.
 
 ## Upgrade
 
-Replace the application files, **and publish the updated `firestore.rules`**
-— this release does not work without it. No IndexedDB migration is
-required for any other module; only the Admissions screen's data source
-changes.
+Replace the application files, **and publish the updated
+`firestore.rules`** — this release does not work without it, and sign-in
+itself depends on it. No IndexedDB migration is required for any other
+module; only these five screens' data source changes.

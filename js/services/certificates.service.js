@@ -20,9 +20,7 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db, request } from '../core/db.js';
-import { uid } from '../utils/id.js';
-import { localDate, nowISO, academicYearOf, formatDateLong, daysBetween } from '../utils/date.js';
+import { localDate, academicYearOf, formatDateLong, daysBetween } from '../utils/date.js';
 import { LEVELS, levelLabel } from '../config/app.config.js';
 import {
     certificates$, students$, programs$, staff$, attendance$, settings$, AttendanceMath
@@ -191,11 +189,9 @@ export async function issue({ studentId, templateId, programId = null, citation 
 
     const seq = await settings$.nextSequence('certificate');
     const serial = formatSerial(seq, year.start);
-    const at = nowISO();
     const actor = session.actorId();
 
-    const certificate = {
-        id: uid('CRT'),
+    const certificate = await certificates$.create({
         serial,
         templateId,
         studentId: student.id,
@@ -217,19 +213,8 @@ export async function issue({ studentId, templateId, programId = null, citation 
         issuedByName: session.actorName(),
         status: 'issued',
         overridden: !eligibility.ok,
-        overrideReason: eligibility.ok ? null : overrideReason.trim(),
-        searchKey: [serial, student.name, spec.name, program?.name].filter(Boolean).join(' ').toLowerCase(),
-        createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor, deletedAt: null
-    };
-
-    await db.unit(['certificates', 'auditLog'], async (s) => {
-        await request(s.certificates.put(certificate));
-        await request(s.auditLog.put({
-            id: uid('AUD'), entity: 'Certificate', entityId: certificate.id, action: 'issue',
-            detail: { serial, studentId: student.id, templateId, overridden: certificate.overridden },
-            actorId: actor, actorName: session.actorName(), at
-        }));
-    }, 'certificate:issue');
+        overrideReason: eligibility.ok ? null : overrideReason.trim()
+    });
 
     bus.emit(EVENTS.CERTIFICATE_ISSUED, { certificate });
     return certificate;

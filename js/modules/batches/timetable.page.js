@@ -15,12 +15,18 @@ import { Page } from '../../core/router.js';
 import { html, render, raw, on } from '../../utils/dom.js';
 import { icon } from '../../ui/icons.js';
 import { toast } from '../../ui/toast.js';
+import { formOverlay } from '../../ui/form.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatNumber } from '../../utils/money.js';
+import { formatDate } from '../../utils/date.js';
 import { timetable } from '../../services/batches.service.js';
 import { listStaff } from '../../services/staff.service.js';
+import { postponeSession, cancelSession } from '../../services/session.service.js';
+
+const STATUS_TONE = { postponed: 'muted', cancelled: 'negative' };
+const STATUS_LABEL = { postponed: 'Postponed', cancelled: 'Cancelled' };
 
 export default class TimetablePage extends Page {
     constructor(context) {
@@ -70,6 +76,14 @@ export default class TimetablePage extends Page {
         this.onDispose(on(this.container, 'click', '[data-register]', (event, target) => {
             event.stopPropagation();
             router.go(`/attendance?batch=${target.dataset.register}&date=${target.dataset.date}`);
+        }));
+        this.onDispose(on(this.container, 'click', '[data-postpone]', (event, target) => {
+            event.stopPropagation();
+            this.postponeSlot(target.dataset.postpone, target.dataset.date);
+        }));
+        this.onDispose(on(this.container, 'click', '[data-cancel-session]', (event, target) => {
+            event.stopPropagation();
+            this.cancelSlot(target.dataset.cancelSession, target.dataset.date);
         }));
 
         this.events.on(EVENTS.BRANCH_CHANGED, () => this.load());
@@ -137,9 +151,12 @@ export default class TimetablePage extends Page {
                             <h2 class="timetable-day-label">${day.label}</h2>
                             ${day.sessions.length ? html`
                                 <ul class="stack stack-sm">
-                                    ${day.sessions.map((entry) => html`
+                                    ${day.sessions.map((entry) => {
+                                        const inactive = entry.sessionStatus === 'postponed' || entry.sessionStatus === 'cancelled';
+                                        return html`
                                         <li>
-                                            <div class="timetable-slot" data-tone="${entry.registerMarked ? 'positive' : ''}">
+                                            <div class="timetable-slot"
+                                                 data-tone="${inactive ? STATUS_TONE[entry.sessionStatus] : (entry.registerMarked ? 'positive' : '')}">
                                                 <button class="timetable-slot-main" data-batch="${entry.id}">
                                                     <span class="timetable-time">
                                                         ${entry.startTime}–${entry.endTime}
@@ -149,14 +166,34 @@ export default class TimetablePage extends Page {
                                                         ${entry.levelLabel} · ${entry.teacherName}
                                                         ${entry.room ? `· ${entry.room}` : ''}
                                                     </span>
+                                                    ${inactive ? html`
+                                                        <span class="badge ${entry.sessionStatus === 'cancelled' ? 'badge-danger' : 'badge-neutral'}">
+                                                            ${STATUS_LABEL[entry.sessionStatus]}
+                                                        </span>
+                                                    ` : ''}
                                                 </button>
-                                                <button class="btn btn-sm btn-ghost timetable-slot-register"
-                                                        data-register="${entry.id}" data-date="${entry.date}">
-                                                    ${raw(icon('check-square', { size: 13 }))} Take register
-                                                </button>
+                                                ${inactive ? '' : html`
+                                                    <div class="row row-tight row-wrap">
+                                                        <button class="btn btn-sm btn-ghost timetable-slot-register"
+                                                                data-register="${entry.id}" data-date="${entry.date}">
+                                                            ${raw(icon('check-square', { size: 13 }))} Take register
+                                                        </button>
+                                                        ${session.can('student.edit') ? html`
+                                                            <button class="btn btn-sm btn-ghost"
+                                                                    data-postpone="${entry.id}" data-date="${entry.date}">
+                                                                Postpone
+                                                            </button>
+                                                            <button class="btn btn-sm btn-ghost"
+                                                                    data-cancel-session="${entry.id}" data-date="${entry.date}">
+                                                                Cancel
+                                                            </button>
+                                                        ` : ''}
+                                                    </div>
+                                                `}
                                             </div>
                                         </li>
-                                    `)}
+                                        `;
+                                    })}
                                 </ul>
                             ` : html`<p class="type-caption type-muted">No classes.</p>`}
                         </section>
@@ -178,17 +215,64 @@ export default class TimetablePage extends Page {
             `}
         `);
     }
+
+    /* --------------------------------------------------------- SESSIONS */
+
+    async postponeSlot(batchId, date) {
+        const done = await formOverlay({
+            title: 'Postpone this class',
+            variant: 'modal',
+            size: 'sm',
+            submitLabel: 'Postpone',
+            intro: 'The original class stays in history as Postponed. A replacement class is scheduled at the new date and time you choose here — attendance is recorded against the replacement, never the original.',
+            fields: [
+                { name: 'newDate', label: 'New date', type: 'date', required: true, width: 'half', value: date },
+                { name: 'newStartTime', label: 'Start time', type: 'time', required: true, width: 'half' },
+                { name: 'newEndTime', label: 'End time', type: 'time', required: true, width: 'half' },
+                { name: 'reason', label: 'Reason', required: true, width: 'half',
+                  hint: 'Teacher unavailable, exams, venue unavailable, academy event…' },
+                { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 }
+            ],
+            onSubmit: async (values) => postponeSession(batchId, date, values)
+        });
+        if (done) {
+            toast.success('Class postponed — a replacement has been scheduled.');
+            await this.load();
+        }
+    }
+
+    async cancelSlot(batchId, date) {
+        const done = await formOverlay({
+            title: 'Cancel this class',
+            variant: 'modal',
+            size: 'sm',
+            submitLabel: 'Cancel class',
+            danger: true,
+            intro: `This class on ${formatDate(date)} will not run. It stays in history as Cancelled — no replacement is created, and attendance can never be recorded against it.`,
+            fields: [
+                { name: 'reason', label: 'Reason', required: true },
+                { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 }
+            ],
+            onSubmit: async (values) => cancelSession(batchId, date, values)
+        });
+        if (done) {
+            toast.success('Class cancelled.');
+            await this.load();
+        }
+    }
 }
 
 /**
  * Overlap detection for display only. The authoritative check is
  * batches.service.findConflicts, which runs before a batch is written; this
- * catches what is already in the database.
+ * catches what is already in the database. A Postponed or Cancelled slot no
+ * longer actually occupies its time, so it can't clash with anything.
  */
 function findClashes(week) {
     const messages = [];
 
-    for (const day of week) {
+    for (const rawDay of week) {
+        const day = { ...rawDay, sessions: rawDay.sessions.filter((s) => s.sessionStatus !== 'postponed' && s.sessionStatus !== 'cancelled') };
         for (let i = 0; i < day.sessions.length; i += 1) {
             for (let j = i + 1; j < day.sessions.length; j += 1) {
                 const a = day.sessions[i];

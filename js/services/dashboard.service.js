@@ -19,7 +19,7 @@ import { localDate, addDays, monthKey, startOfMonth, lastMonths, formatMonth, da
 import { STUDENT_STATUS } from '../config/app.config.js';
 import {
     students$, batches$, admissions$, invoices$, payments$, programs$,
-    attendance$, staff$, branches$, branchIdsOf, AttendanceMath, PaymentMath, InvoiceMath
+    attendance$, staff$, branches$, holidays$, branchIdsOf, AttendanceMath, PaymentMath, InvoiceMath
 } from '../data/repositories.js';
 import { dayBoard, trend as attendanceTrend, missingRegisters } from './attendance.service.js';
 import { collectionSummary } from './fees.service.js';
@@ -154,14 +154,18 @@ export async function headline(branchId = null) {
  */
 export async function today(branchId = null) {
     const date = localDate();
-    const board = await dayBoard(date, branchId);
+    // Attendance no longer knows about holidays (Milestone 6 — Holiday
+    // handling moved out of that module's scope); this panel still wants
+    // to say "no classes today" on one, so it reads the Holidays calendar
+    // directly rather than through dayBoard().
+    const [board, holiday] = await Promise.all([dayBoard(date, branchId), holidays$.on(date, branchId)]);
 
     const done = board.batches.filter((b) => b.done).length;
     const nowTime = new Date().toTimeString().slice(0, 5);
 
     return {
         date,
-        holiday: board.holiday,
+        holiday,
         classes: board.batches.map((b) => ({
             id: b.id,
             name: b.name,

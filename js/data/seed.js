@@ -549,11 +549,9 @@ async function seedAttendance(students, batches) {
                 const reliability = 0.78 + (hashFraction(student.id) * 0.2);
                 const roll = random();
 
-                let status;
-                if (roll < reliability) status = ATTENDANCE_STATUS.PRESENT;
-                else if (roll < reliability + 0.06) status = ATTENDANCE_STATUS.LATE;
-                else if (roll < reliability + 0.10) status = ATTENDANCE_STATUS.EXCUSED;
-                else status = ATTENDANCE_STATUS.ABSENT;
+                // Attendance is Present/Absent only (Milestone 6) — no Late,
+                // Excused, or Holiday status exists to seed anymore.
+                const status = roll < reliability ? ATTENDANCE_STATUS.PRESENT : ATTENDANCE_STATUS.ABSENT;
 
                 records.push(stamp({
                     id: uid('ATT'),
@@ -567,7 +565,7 @@ async function seedAttendance(students, batches) {
                     date,
                     status,
                     markedBy: batch.teacherId,
-                    note: status === ATTENDANCE_STATUS.EXCUSED ? pick(['Unwell', 'Family function', 'School exam']) : null
+                    note: null
                 }));
             }
         }

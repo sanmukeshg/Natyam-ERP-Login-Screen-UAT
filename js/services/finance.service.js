@@ -9,25 +9,32 @@
  *   Finance answers "what did the school earn and spend".
  *
  * They meet at exactly one point: a cleared payment posts an income entry to
- * the ledger. That posting happens inside the fee service's transaction, so
- * the ledger cannot drift from the receipts. This module never reaches back
- * into invoices to recompute income — if it did, the two would eventually
- * disagree and there would be no way to say which was right.
+ * the ledger. That posting happens inside the fee service's own atomic
+ * transaction, so the ledger cannot drift from the receipts. This module
+ * never reaches back into invoices to recompute income — if it did, the two
+ * would eventually disagree and there would be no way to say which was right.
  *
  * Every amount here is integer paise. There is no floating point anywhere in
  * this file, which is why the P&L adds up.
+ *
+ * Expense and payroll postings that touch both their own store and the
+ * ledger together (recordExpense, updateExpense, removeExpense, paySalaries)
+ * used to be a single IndexedDB `db.unit()`. Milestone 21 moved the
+ * mechanics of that atomic write to postExpenseCreate()/postExpenseUpdate()/
+ * postExpenseRemove()/postPayroll() (js/data/ledger.repository.firestore.js,
+ * re-exported from repositories.js) — Firestore SDK access is reserved to
+ * the repository layer. This service still owns every validation decision;
+ * it just hands the repository layer fully-formed data to write atomically.
  */
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db, request } from '../core/db.js';
-import { uid } from '../utils/id.js';
 import { localDate, nowISO, monthKey, lastMonths, startOfMonth, endOfMonth, formatMonth } from '../utils/date.js';
 import { expenseCategories } from '../config/app.config.js';
-import { auditRow } from './audit.service.js';
 import {
     ledger$, expenses$, salaries$, staff$, branches$, settings$,
-    LedgerMath, ExpenseMath
+    LedgerMath, ExpenseMath,
+    postExpenseCreate, postExpenseUpdate, postExpenseRemove, postPayroll
 } from '../data/repositories.js';
 import { notify } from './notifications.service.js';
 
@@ -136,10 +143,8 @@ export async function recordExpense(data) {
 
     const at = nowISO();
     const actor = session.actorId();
-    const expenseId = uid('EXP');
 
-    const expense = {
-        id: expenseId,
+    const expenseFields = {
         branchId,
         date,
         period: monthKey(date),
@@ -154,28 +159,22 @@ export async function recordExpense(data) {
         createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor, deletedAt: null
     };
 
-    const entry = {
-        id: uid('LDG'),
+    const ledgerFields = {
         branchId,
         date,
         period: monthKey(date),
         account: data.category,
         type: 'expense',
         amount,
-        narration: [expense.description, expense.paidTo].filter(Boolean).join(' — '),
+        narration: [expenseFields.description, expenseFields.paidTo].filter(Boolean).join(' — '),
         sourceType: 'expense',
-        sourceId: expenseId,
         createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor
     };
 
-    await db.unit(['expenses', 'ledgerEntries', 'auditLog'], async (s) => {
-        await request(s.expenses.put(expense));
-        await request(s.ledgerEntries.put(entry));
-        await request(s.auditLog.put(auditRow('Expense', expenseId, 'create', { amount, category: expense.category })));
-    }, 'finance:expense');
+    const { expense, ledgerEntry } = await postExpenseCreate({ expenseFields, ledgerFields });
 
     bus.emit(EVENTS.EXPENSE_RECORDED, { expense });
-    bus.emit(EVENTS.LEDGER_POSTED, { entry });
+    bus.emit(EVENTS.LEDGER_POSTED, { entry: ledgerEntry });
 
     // Returns the expense itself, like every other create in the service layer.
     // It previously returned { expense, entry }, which meant callers reaching
@@ -185,7 +184,7 @@ export async function recordExpense(data) {
 }
 
 /**
- * Edits an expense. The ledger entry is rewritten in the same transaction, so
+ * Edits an expense. The ledger entry is rewritten in the same atomic write, so
  * correcting an amount cannot leave the books quoting the old one.
  */
 export async function updateExpense(id, changes) {
@@ -198,8 +197,10 @@ export async function updateExpense(id, changes) {
     if (amount <= 0) throw new Error('The amount must be more than zero.');
     if (date > localDate()) throw new Error('An expense cannot be dated in the future.');
 
+    const { id: existingId, ...existingData } = existing;
+    void existingId;
     const next = {
-        ...existing, ...changes,
+        ...existingData, ...changes,
         amount, date,
         period: monthKey(date),
         updatedAt: nowISO(),
@@ -208,21 +209,22 @@ export async function updateExpense(id, changes) {
 
     const linked = (await ledger$.bySource(id))[0] || null;
     const nextEntry = linked ? {
-        ...linked,
         date, period: monthKey(date), amount,
         account: next.category,
         narration: [next.description, next.paidTo].filter(Boolean).join(' — '),
         updatedAt: nowISO(), updatedBy: session.actorId()
     } : null;
 
-    await db.unit(['expenses', 'ledgerEntries', 'auditLog'], async (s) => {
-        await request(s.expenses.put(next));
-        if (nextEntry) await request(s.ledgerEntries.put(nextEntry));
-        await request(s.auditLog.put(auditRow('Expense', id, 'update', { amount })));
-    }, 'finance:expense-update');
+    await postExpenseUpdate({
+        expenseId: id,
+        expenseFields: next,
+        ledgerEntryId: linked?.id || null,
+        ledgerFields: nextEntry
+    });
 
-    bus.emit(EVENTS.EXPENSE_RECORDED, { expense: next });
-    return next;
+    const updated = { id, ...next };
+    bus.emit(EVENTS.EXPENSE_RECORDED, { expense: updated });
+    return updated;
 }
 
 /** Removes an expense and its ledger entry together. */
@@ -230,15 +232,15 @@ export async function removeExpense(id, { reason }) {
     session.require('finance.edit', 'remove an expense');
     if (!reason?.trim()) throw new Error('Say why this expense is being removed.');
 
-    const existing = await expenses$.findOrFail(id);
+    await expenses$.findOrFail(id);
     const linked = (await ledger$.bySource(id))[0] || null;
     const at = nowISO();
 
-    await db.unit(['expenses', 'ledgerEntries', 'auditLog'], async (s) => {
-        await request(s.expenses.put({ ...existing, deletedAt: at, deletedBy: session.actorId(), deleteReason: reason.trim() }));
-        if (linked) await request(s.ledgerEntries.delete(linked.id));
-        await request(s.auditLog.put(auditRow('Expense', id, 'archive', { reason: reason.trim() })));
-    }, 'finance:expense-remove');
+    await postExpenseRemove({
+        expenseId: id,
+        expenseFields: { deletedAt: at, deletedBy: session.actorId(), deleteReason: reason.trim() },
+        ledgerEntryId: linked?.id || null
+    });
 
     return true;
 }
@@ -341,18 +343,16 @@ export async function paySalaries(salaryIds, { paidOn = null, mode = 'bank' } = 
     const at = nowISO();
     const actor = session.actorId();
 
-    const paid = unpaid.map((line) => ({
-        ...line,
+    const changes = {
         status: 'paid',
         paidOn: date,
         mode,
         paidBy: actor,
         updatedAt: at,
         updatedBy: actor
-    }));
+    };
 
-    const entries = paid.map((line) => ({
-        id: uid('LDG'),
+    const entryFields = unpaid.map((line) => ({
         branchId: line.branchId,
         date,
         period: monthKey(date),
@@ -365,18 +365,15 @@ export async function paySalaries(salaryIds, { paidOn = null, mode = 'bank' } = 
         createdAt: at, createdBy: actor, updatedAt: at, updatedBy: actor
     }));
 
-    await db.unit(['salaries', 'ledgerEntries', 'auditLog'], async (s) => {
-        for (const line of paid) await request(s.salaries.put(line));
-        for (const entry of entries) await request(s.ledgerEntries.put(entry));
-        await request(s.auditLog.put(auditRow('Salary', null, 'pay', {
-            period: paid[0].period, count: paid.length,
-            total: paid.reduce((sum, l) => sum + l.net, 0)
-        })));
-    }, 'finance:payroll');
+    const createdEntries = await postPayroll({
+        lines: unpaid.map((line) => ({ id: line.id, changes })),
+        entries: entryFields
+    });
 
+    const paid = unpaid.map((line) => ({ ...line, ...changes }));
     const total = paid.reduce((sum, l) => sum + l.net, 0);
     bus.emit(EVENTS.SALARY_PROCESSED, { period: paid[0].period, count: paid.length, total });
-    for (const entry of entries) bus.emit(EVENTS.LEDGER_POSTED, { entry });
+    for (const entry of createdEntries) bus.emit(EVENTS.LEDGER_POSTED, { entry });
 
     return { count: paid.length, total, lines: paid };
 }

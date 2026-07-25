@@ -9,6 +9,513 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.14.0] — 2026-07-25 — Settings Reference Data Migration & Completion
+
+Branches, Academic Years, Curricula, Curriculum Levels, and Holidays — the
+last data-shape migration before the Audit Log. The highest-blast-radius
+migration by reach (branchId appears on nearly every record in the app)
+but a small one by write volume: only `settings.service.js` and
+`curriculum.service.js` ever write to any of these five, and no
+repository-bypass bug exists in either. Two uniqueness gaps closed and one
+genuine, pre-existing boot-time fragility fixed — not a redesign of
+settings management.
+
+### Added
+- **Five Firestore collections** (`branches`, `academicYears`, `curricula`,
+  `curriculumLevels`, `holidays`), same field shapes as the IndexedDB
+  models. `branches.code` and `curricula.code` remain their human-facing
+  identifiers exactly as before. `firestore.rules` extended: read open to
+  every provisioned active user (branch/year/curriculum data is used
+  across nearly every screen); write gated to Administrator only via a
+  new `canManageSettings()` helper, matching `settings.edit`'s actual
+  grant. Curriculum Levels and Holidays — which have no write path
+  anywhere in the app today — are denied create/update/delete outright
+  rather than granted speculatively.
+
+### Fixed
+- **`branches.code` and `curricula.code` uniqueness were enforced only by
+  IndexedDB's native unique index**, not by application code — Firestore
+  has no equivalent constraint. Both repositories' `create()`/`update()`
+  now check explicitly for a clashing code, the same fix Batches got in
+  Milestone 19. `createBranch()` had a partial manual check that missed
+  `updateBranch()`; `curriculum.service.js`'s create/update had no check
+  at all.
+- **A genuine boot-time fragility**: `js/app.js`'s `hydrateSession()` —
+  called on every sign-in and every reload — read `branches$.active()`
+  with no try/catch of its own. Any failure there was caught by the outer
+  handler around `resolveProvisionedUser()` and misdiagnosed as "not
+  provisioned, inactive, or archived," signing the person back out with a
+  misleading message. Harmless while branches was IndexedDB (a read
+  essentially never failed); dangerous now that it's a Firestore read that
+  can genuinely fail (permission-denied during rules propagation, a
+  dropped connection). Fixed to degrade gracefully instead — a signed-in,
+  provisioned person now sees the app with an explanatory toast rather
+  than being bounced to the login screen.
+
+### Changed
+- **`academicYears$.makeCurrent(id)`** — the one genuine multi-document
+  atomic write among these five, keeping "exactly one current year" true
+  — now uses a Firestore `writeBatch()` in place of the original's raw
+  IndexedDB transaction, preserving the same read-outside/write-inside
+  shape.
+- The five IndexedDB repository classes are archived, not deleted, at
+  `js/data/archive/*.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route all five sections through Firestore, the same fix already made
+  for every prior migration; the branch-selection cleanup on restore now
+  reads from the Firestore-sourced rows instead of the generic backup
+  bucket it used to.
+
+---
+
+## [2.13.0] — 2026-07-25 — Documents + Admission Drafts + Notifications Migration & Completion
+
+Three small, independent modules — Documents, Admission Drafts, and
+Notifications — migrated together in one milestone rather than three,
+since each has exactly one consuming service file and none is atomically
+coupled to any other store. One genuine repository-bypass bug was found
+and fixed. No redesign of drafts, documents, or the notification feed —
+notifications remain global (not per-user), exactly as before.
+
+### Added
+- **Three Firestore collections** (`documents`, `admissionDrafts`,
+  `notifications`), same field shapes as the IndexedDB models. None had a
+  human-facing business code before — nothing new introduced.
+- `firestore.rules` extended with three new collection blocks. None of the
+  three has its own capability in the app — rules faithfully mirror that:
+  Documents' only real check is the student-deletion cascade
+  (Administrator only); Admission Drafts have no capability check beyond
+  being signed in, matching `saveDraft()`/`discardDraft()`'s actual
+  behaviour exactly; Notifications are read/mark-read by anyone signed in
+  (matching the global bell badge), with one precise exception —
+  posting or removing an **announcement** requires Administrator,
+  translated directly from `announce()`/`removeAnnouncement()`'s existing
+  `settings.edit` check via a field-level rule on the `announcement` flag.
+
+### Fixed
+- **`saveDraft()` and `discardDraft()` bypassed the drafts repository**,
+  writing directly via `db.put()`/`db.remove()` instead of
+  `drafts$.create()`/`.update()`/`.remove()` — the same class of defect
+  fixed for Certificates' `issue()` (Milestone 18) and Fee Collection's
+  `createInvoice()`/`sweepOverdue()` (Milestone 21). Once the store moved
+  to Firestore this would have failed outright — saving a draft mid-
+  application is core to how the admissions wizard survives an interrupted
+  session. Rewritten to preserve the exact same id-reuse and timestamp
+  behaviour the raw writes had.
+
+### Changed
+- The three IndexedDB repository classes are archived, not deleted, at
+  `js/data/archive/*.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route all three sections through Firestore, the same fix already made
+  for every prior migration.
+
+---
+
+## [2.12.0] — 2026-07-25 — Fee Collection + Finance Module Migration & Completion
+
+Fee Collection (`feePlans`, `invoices`, `payments`) and Finance
+(`ledgerEntries`, `expenses`, `salaries`) — six stores, migrated together
+in one milestone because they were atomically coupled: recording a
+payment, refunding one, recording an expense, editing one, removing one,
+and disbursing payroll all wrote across multiple stores (including the
+ledger) in a single IndexedDB transaction, specifically to prevent a
+payment landing with no ledger income behind it, or vice versa. This is
+the ninth through fourteenth stores moved to Cloud Firestore, and the
+first migration requiring a genuine multi-collection atomic transaction —
+Firestore's own `runTransaction()`/`writeBatch()` now provide the same
+guarantee IndexedDB's `db.unit()` used to. Two repository-bypasses and one
+real correctness bug were found and fixed during the review; no other
+module's business logic changed.
+
+### Added
+- **Six Firestore collections** (`feePlans`, `invoices`, `payments`,
+  `ledgerEntries`, `expenses`, `salaries`), same field shapes as the
+  IndexedDB models. Invoice numbers and receipt numbers keep working
+  exactly as before — allocated from the settings counter
+  (`settings$.nextSequence()`, still IndexedDB), which was always the real
+  uniqueness guarantee; the IndexedDB unique index was a secondary guard
+  that didn't need replacing, unlike Batches' `code` field.
+- **The atomic cross-collection postings** — `postPayment()`,
+  `postRefund()`, `postExpenseCreate()`, `postExpenseUpdate()`,
+  `postExpenseRemove()`, `postPayroll()` — now live in
+  `js/data/ledger.repository.firestore.js`, since Firestore SDK access is
+  reserved to the repository layer. `fees.service.js`/`finance.service.js`
+  still own every validation decision; the repository layer performs the
+  atomic write and re-verifies an invoice's live balance/status with a
+  fresh read where a concurrent payment could have changed it.
+- `firestore.rules` extended with six new collection blocks. One real,
+  pre-existing asymmetry in the app's own capability model is now also
+  enforced server-side: Teacher & Reception can create a ledger entry (by
+  collecting a fee payment) but cannot read the ledger — they hold
+  `fee.collect` but not `finance.view`.
+
+### Fixed
+- **`createInvoice()` and `sweepOverdue()` bypassed the invoice
+  repository**, writing directly via `db.put()`/`db.putMany()` instead of
+  `invoices$.create()`/`.update()` — the same class of defect fixed for
+  Certificates' `issue()` in Milestone 18. Once the store moved to
+  Firestore this would have failed outright.
+- **Salary adjustments involving allowances persisted an understated
+  `net`.** `SalaryRepository.beforeSave()` unconditionally recomputed
+  `net: gross - deductions`, silently dropping `allowances` — even though
+  `adjustSalary()` always computed the correct `gross + allowances -
+  deductions` and handed it in. Fixed in the new repository; the archived
+  IndexedDB snapshot keeps the original formula unchanged, per the archive
+  convention.
+- `waiveInvoice()`/`cancelInvoice()` no longer need a multi-store
+  transaction — they only ever touched `invoices`, so they now call
+  `invoices$.update()` directly, which is simpler and writes its own audit
+  row the same way every other Firestore repository does.
+
+### Changed
+- The six IndexedDB repository classes are archived, not deleted, at
+  `js/data/archive/*.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route all six sections through Firestore, the same fix already made for
+  every prior migration.
+
+---
+
+## [2.11.0] — 2026-07-25 — Staff Module Migration & Completion
+
+Staff is the eighth module migrated to Cloud Firestore, following the
+exact pattern already established for Students/Admissions/Attendance/Class
+Sessions/Programmes/Certificates/Batches. Chosen specifically because it
+carries no atomic multi-store transaction coupling to any remaining
+IndexedDB store (verified by auditing every `db.unit([...])` call in the
+codebase) — unlike Fee Collection and Finance, which turned out to be
+atomically coupled via a shared transaction and must be migrated together,
+later, as their own milestone. No repository-bypass and no uniqueness gap
+were found this time; this is a clean lift-and-shift plus one internal
+relocation. No redesign of hiring, deactivation, or payroll-prep logic.
+
+### Added
+- **`staff` Firestore collection**, same field shape as the IndexedDB
+  model. `employeeNo` remains the staff member's human-facing identifier
+  exactly as before — its uniqueness was already enforced at the service
+  layer (`hire()`), not by a storage constraint, so nothing changes there.
+  `firestore.rules` extended: read open to every provisioned active user
+  (all four roles hold `staff.view`); create/update gated to Administrator
+  only via a new `canManageStaff()` helper (`staff.edit` is held by no
+  other role).
+
+### Changed
+- **`branchIdsOf()`** — the helper that resolves a staff member's branch
+  memberships — moved from `js/data/repositories.js` into the new
+  `js/data/staff.repository.firestore.js` (it was Staff-domain logic with
+  no store dependency of its own) and is re-exported from
+  `repositories.js` unchanged, the same pattern already used for
+  `AttendanceMath`. Every existing caller keeps importing it from the same
+  place with no code changes.
+- The IndexedDB `StaffRepository` is archived, not deleted, at
+  `js/data/archive/staff.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `staff` section through Firestore, the same fix already made
+  for Students, Admissions, Attendance, Class Sessions, Programmes,
+  Certificates, and Batches.
+
+---
+
+## [2.10.0] — 2026-07-25 — Batches Module Migration & Completion
+
+Batches is the seventh module migrated to Cloud Firestore, following the
+exact pattern already established for Students/Admissions/Attendance/Class
+Sessions/Programmes/Certificates — and the most load-bearing one yet:
+`batches$` is read directly by eleven other services, all of which now
+run entirely on Firestore with no remaining IndexedDB dependency. One
+application-level fix was required — a uniqueness guarantee that was only
+ever enforced by IndexedDB's storage layer. No redesign of scheduling
+rules, conflict detection, or the UI.
+
+### Added
+- **`batches` Firestore collection**, same field shape as the IndexedDB
+  model. `code` (e.g. HYD-PRA-A) remains the batch's human-facing
+  identifier exactly as before — no new business-identifier field was
+  introduced. `firestore.rules` extended: read open to every provisioned
+  active user (all four roles hold `student.view`, which gates the
+  Batches/Timetable nav entries); create/update reuses the existing
+  `canManageStudents()` helper directly rather than introducing a new
+  one — batch lifecycle actions have always piggybacked on `student.edit`
+  (there is no separate `batch.edit` capability), the same situation
+  Class Sessions is already in.
+
+### Fixed
+- **Batch code uniqueness was enforced only by IndexedDB's native unique
+  index**, not by any application code — Firestore has no equivalent
+  constraint. `create()`/`update()` on the new repository now check
+  explicitly for a clashing code and raise a clear error, replacing the
+  guarantee the index used to provide. This is the one behavioural
+  addition in an otherwise lift-and-shift migration.
+
+### Changed
+- The IndexedDB `BatchRepository` is archived, not deleted, at
+  `js/data/archive/batches.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `batches` section through Firestore, the same fix already
+  made for Students, Admissions, Attendance, Class Sessions, Programmes,
+  and Certificates.
+
+---
+
+## [2.9.0] — 2026-07-25 — Certificates Module Migration & Completion
+
+Certificates (level completions, participation, merit awards, performance
+diplomas) is the sixth module migrated to Cloud Firestore, following the
+exact pattern already established for Students/Admissions/Attendance/Class
+Sessions/Programmes. A repository-bypass in certificate issuance and a
+pre-existing display bug found during the migration review were also
+fixed. No new features, no redesigned eligibility rules, no other module
+changed.
+
+### Added
+- **`certificates` Firestore collection**, same field shape as the
+  IndexedDB model. `serial` (NAT/CRT/YY/0000, allocated from the settings
+  counter) remains the certificate's human-facing identifier exactly as
+  before — no new business-identifier field was introduced.
+  `firestore.rules` extended: read open to every provisioned active user
+  (all four roles hold `program.view`, which also gates the Certificates
+  page); create/update gated to Administrator only (`certificate.issue` is
+  not held by any other role); the one hard-delete path (a student's
+  certificates, cascade-deleted along with the rest of their record when
+  the student itself is deleted) gated to Administrator, mirroring
+  Attendance's precedent.
+
+### Fixed
+- **`issue()` wrote directly to IndexedDB, bypassing the repository
+  entirely.** `certificates.service.js`'s `issue()` used a raw
+  `db.unit(['certificates', 'auditLog'], ...)` transaction instead of
+  going through `certificates$`, the same class of defect fixed for
+  Admissions' `enrolApplicant()` in Milestone 5. Once the store moved to
+  Firestore this would have failed outright — issuing a certificate is the
+  module's core function. Now routes through `certificates$.create()`.
+- **A revoked certificate's reason never displayed.** `revoke()` writes
+  `revokeReason`; the certificate detail drawer and the public verify
+  banner both read `certificate.revocationReason` — a field that was never
+  set. Always showed "No reason recorded," even when one had been given.
+- **The verify-a-serial dialog showed garbled results.** It treated
+  `verify()`'s return value (`{ found, valid, certificate, message }`) as
+  if it were the certificate itself, reading `found.studentName` /
+  `found.templateName` / `found.issuedOn` — none of which exist at that
+  level — and an `if (!found)` check that could never be true. The service
+  already builds the correct human-readable message for every outcome;
+  the dialog now just displays it.
+
+### Changed
+- The IndexedDB `CertificateRepository` is archived, not deleted, at
+  `js/data/archive/certificates.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `certificates` section through Firestore, the same fix already
+  made for Students, Admissions, Attendance, Class Sessions, and
+  Programmes.
+
+---
+
+## [2.8.0] — 2026-07-25 — Programmes Module Migration & Completion
+
+Programmes (performances, workshops, competitions, examinations) is the
+fifth module migrated to Cloud Firestore, following the exact pattern
+already established for Students/Admissions/Attendance. Two pre-existing
+display bugs found during the migration review were also fixed. No new
+features, no integrations with Batches/Timetable/Sessions/Attendance were
+added — none were already intended, so none were introduced. No other
+module changed.
+
+### Added
+- **`programs` Firestore collection**, same field shape as the IndexedDB
+  model, no new business-identifier field (a Programme was never addressed
+  by one — people reference it by name and date, and none was invented
+  here). `firestore.rules` extended: read open to every provisioned active
+  user (all four roles hold `program.view`), write gated to Administrator
+  and Teacher & Reception (`program.edit`).
+
+### Fixed
+- **The cancellation reason never displayed.** `cancel()` writes
+  `cancelReason`; the cancelled-programme banner read
+  `program.cancellationReason` — a field that was never set. Always showed
+  "No reason recorded," even when one had been given. Fixed to read the
+  field the service actually writes.
+- **Completion notes never displayed.** `complete()` writes `notes`; the
+  detail view read `program.completionNotes` — again, never set. Fixed the
+  same way.
+
+### Changed
+- The IndexedDB `ProgramRepository` is archived, not deleted, at
+  `js/data/archive/programs.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `programs` section through Firestore, the same fix already
+  made for Students, Admissions, Attendance, and Class Sessions.
+
+---
+
+## [2.7.0] — 2026-07-25 — Timetable Session Management & Session Lifecycle
+
+Introduces a first-class Timetable Session entity — an individual
+occurrence of a batch's recurring class, with its own lifecycle (Scheduled
+→ Completed / Postponed / Cancelled) and history. Attendance now records
+against a Session rather than a raw batch+date pair, using the upgrade
+seam Milestone 6 was deliberately built around. No other module changed.
+
+### Added
+- **`classSessions` Firestore collection** — Timetable owns this entirely;
+  Attendance references a session by id but never reads or writes the
+  collection itself (enforced by architecture: only `session.service.js`
+  touches it). Sessions are scheduled lazily — the first time a register is
+  opened/marked for a batch+date, or an explicit postpone/cancel action —
+  not pre-created for the whole future calendar.
+- **Session Postpone**, from the Timetable page: captures a reason,
+  optional remarks, and a new date/time/teacher. The original session is
+  marked Postponed and kept permanently in history — never deleted — and
+  a linked Replacement session is created atomically alongside it
+  (`originalSessionId`/`replacementSessionId` point at each other).
+  Attendance can only ever be recorded against the Replacement.
+- **Session Cancel**, from the Timetable page: captures a reason and
+  remarks; the session is marked Cancelled, kept in history, and can never
+  have attendance recorded against it. No replacement is created.
+- **Session Code** (`TS-20260714-JUNIOR`-style) — a human-readable
+  identifier derived directly from the batch's code and the date, not the
+  shared atomic sequence counter (a batch+date pairing is already
+  guaranteed unique on its own).
+- Timetable's week view now shows each day's real session status
+  (Postponed/Cancelled badges) and surfaces a Replacement session on its
+  actual date, even when that date isn't one of the batch's normal
+  recurring days. Clash detection now ignores Postponed/Cancelled slots,
+  since they no longer occupy their time.
+- `firestore.rules` extended for `classSessions` — read open to every
+  provisioned active user (matching Timetable's own visibility), write
+  gated the same way batch management already is.
+
+### Changed
+- **Attendance's `postRegister()` now resolves and checks a Session before
+  writing.** A Postponed original or a Cancelled session can never be
+  marked; a Scheduled session becomes Completed automatically the moment
+  its register is successfully posted. Attendance rows carry a new
+  `sessionId` field, added alongside the existing `batchId`/`date` fields
+  — every existing read path (Week/Range/Month grids, reports, dashboard)
+  is unchanged.
+- The `isScheduledClassDay()` helper Milestone 6 built specifically for
+  this future upgrade has moved from `attendance.service.js` to
+  `session.service.js` — its rightful home now that a real Session concept
+  exists — and is imported back into `attendance.service.js` and
+  `batches.service.js` from there rather than duplicated.
+- `js/services/backup.service.js` extended for `classSessions` — the first
+  Firestore collection with no prior IndexedDB history at all, so
+  `restore()`'s recognition filter was widened (`FIRESTORE_ONLY_SECTIONS`)
+  rather than inventing a fictional unused IndexedDB store declaration.
+
+### Known limitations
+- No historical backfill: sessions only exist from this release forward;
+  a register marked before this milestone has no session behind it.
+- `originalSessionId`/`replacementSessionId` (and Attendance's own
+  `sessionId`) are not remapped across a full backup restore — restoring
+  reassigns every document a fresh Firestore id, so these cross-references
+  would point at ids that no longer exist after a restore. Disclosed, not
+  fixed, matching the same class of limitation already accepted for
+  Admissions' `studentId` reference in Milestone 5.
+- Timetable's teacher-schedule view (`teacherSchedule()`, used by the
+  Dashboard's teacher panel) and Attendance's `missingRegisters()`/
+  `teacherCompliance()` are not session-status-aware — a Postponed or
+  Cancelled date can still appear there as an ordinary day. Not extended,
+  per this milestone's explicit scope (do not redesign Attendance or
+  Reports unless required).
+
+---
+
+## [2.6.0] — 2026-07-25 — Attendance Migration to Cloud Firestore
+
+Attendance is the fourth module migrated to Cloud Firestore, alongside
+three approved business simplifications: NATYAM has no Leave concept,
+Attendance records only Present/Absent, and Holiday handling is no longer
+part of Attendance's scope. Every other module (Fees, Finance, Batches,
+Timetable's own scheduling, Reports, Dashboard) is otherwise unaffected.
+
+### Added
+- **`attendance` Firestore collection**, same field shape as the IndexedDB
+  model. The old unique composite index (`batchId|date|studentId`) is
+  replaced by a query-then-upsert against the plain `batchId`/`date`
+  fields — Firestore has no equivalent index type — while keeping the same
+  guarantee: re-marking a register updates it, never duplicates it.
+- **Week View (default), Custom Date Range, and Month View** replace the
+  previous single-date register screen. Week and Custom Range are marked
+  directly in the grid; Month is unchanged, promoted from a drawer button
+  to an equal-standing tab. All three show only the days a batch actually
+  meets, and Week/Range totals are computed automatically.
+- **Attendance restored to the main navigation**, positioned immediately
+  after Timetable — previously hidden (still reachable only via
+  Timetable's "Take register" link).
+- **`firestore.rules`** extended for the `attendance` collection:
+  `attendance.view` (Administrator, Teacher & Reception, Viewer — Owner &
+  Accountant does not hold this capability) for reads, `attendance.mark`
+  (Administrator, Teacher & Reception) for writes.
+
+### Changed
+- **Attendance now records only Present or Absent.** Late, Excused, and
+  Holiday statuses are removed from `ATTENDANCE_STATUS` and from every
+  calculation that read them (`AttendanceMath.rateOf()`/`breakdownOf()`,
+  the Attendance Register report, `seed.js`'s demo data generator).
+- **Attendance can only be marked for a scheduled class.** `postRegister()`
+  now hard-rejects a date the batch doesn't meet on, enforced through one
+  function (`isScheduledClassDay()`) backed by the batch's own weekly
+  schedule for now — deliberately isolated behind this one seam so a
+  future Timetable-based session concept can become the real source of
+  truth later without any other part of Attendance changing.
+- The IndexedDB `AttendanceRepository` is archived, not deleted, at
+  `js/data/archive/attendance.repository.indexeddb.js` for rollback.
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` updated to
+  route the `attendance` section through Firestore, the same fix already
+  made for Students and Admissions.
+
+### Removed
+- **The Leave Request feature, entirely** — NATYAM has no Leave concept.
+  `LeaveRequestRepository`, the `leaveRequests` IndexedDB store,
+  `requestLeave()`/`decideLeave()`, the Attendance page's leave approval
+  UI, and the Students page's "Record leave" action are all removed; no
+  other module referenced any of it.
+- **Holiday handling removed from Attendance's scope** —
+  `declareHoliday()`/`removeHoliday()` and the "Declare holiday" action are
+  removed from the Attendance module. The Holidays calendar itself
+  (`holidays$`) is kept, unreferenced by Attendance, for a separate future
+  Holiday module; the Dashboard's own "no classes today" panel now reads
+  it directly rather than through Attendance.
+
+---
+
+## [2.5.1] — 2026-07-24 — Post-Deployment UAT Fixes
+
+First real end-to-end UAT of the Google Authentication and Firestore
+migration work (Milestones 2–5), performed against a live, empty Firestore
+project. Found and fixed two genuine runtime defects that no prior static
+analysis or automated check could reach, since both only manifest with a
+real signed-in session against real Firestore.
+
+### Fixed
+- **`bootstrapAdministrator()` always failed with "Choose a role."** —
+  validated the caller's raw input before assigning the `administrator`
+  role internally, so the check for a role always failed. Reordered to
+  validate the fully-assembled record instead. This is the function that
+  lets the first sign-in on a new school's Firestore project become
+  Administrator — it had never succeeded until this fix.
+- **`students$ is not defined` — a `ReferenceError` breaking the Dashboard's
+  roll panel, Batches' occupancy column, Admissions' eligible-batch picker,
+  and Fee Plans' usage-count check.** `js/data/repositories.js` re-exported
+  `students$` without also importing it locally; two of its own methods
+  referenced it as a bare identifier. Added the missing local import
+  alongside the existing re-export — no duplicate repository instance,
+  since both resolve to the same singleton.
+
+### Operational
+- The live Firestore project's published Security Rules were a stale,
+  pre-role-consolidation draft and have been republished to match this
+  repository's current `firestore.rules` — a Firebase Console action, not
+  a code change, but required for any of the above to work at all.
+
+### Removed
+- The temporary diagnostic logging added to `auth.service.js` during this
+  UAT round to find the bootstrap root cause has been removed; the
+  original production error handling is restored unchanged.
+
+---
+
 ## [2.5.0] — 2026-07-24 — Admissions Migration to Cloud Firestore
 
 Admissions is the third module migrated to Cloud Firestore (see ADR-014 and
