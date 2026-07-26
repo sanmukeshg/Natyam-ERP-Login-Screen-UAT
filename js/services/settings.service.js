@@ -24,6 +24,10 @@ import {
     settings$, branches$, academicYears$, feePlans$, users$, students$, staff$, batches$, invoices$,
     programs$, expenses$, branchIdsOf
 } from '../data/repositories.js';
+import { provisionEmailPasswordUser } from './auth.service.js';
+
+/** The only sign-in methods NATYAM knows about — kept in one place so a typo in a form value fails loudly, not silently. */
+const KNOWN_AUTH_METHODS = ['password', 'google', 'mobile'];
 
 /* ==========================================================================
    INSTITUTE
@@ -472,19 +476,50 @@ export async function listUsers() {
 export async function createUser(data) {
     session.require('settings.edit', 'add a user');
 
+    // No default injected here — an Administrator must explicitly choose at
+    // least one sign-in method for every account; there is no "assume
+    // Google" fallback anywhere in this milestone (see
+    // js/migrations/authMethodsMigration.js's header for why).
+    const authMethods = Array.isArray(data.authMethods) ? data.authMethods : [];
+    if (!authMethods.length) throw new Error('Choose at least one sign-in method.');
+    const unknown = authMethods.find((m) => !KNOWN_AUTH_METHODS.includes(m));
+    if (unknown) throw new Error(`"${unknown}" is not a recognised sign-in method.`);
+
     const record = {
         ...data,
         name: String(data.name || '').trim(),
         email: data.email?.trim().toLowerCase() || null,
         role: data.role,
-        status: 'active'
+        status: 'active',
+        authMethods
     };
+    delete record.password;
 
     if (!record.name) throw new Error('A user needs a name.');
     if (!record.role || !roleTable()[record.role]) throw new Error('Choose a valid role.');
 
     const clash = record.email && (await users$.all()).find((u) => u.email === record.email);
     if (clash) throw new Error(`${clash.name} already uses that email address.`);
+
+    // Mobile numbers are unique across the whole system — Mobile OTP
+    // resolves an incoming identity by phone number alone (findByMobile()),
+    // so two active accounts sharing one number would make that resolution
+    // ambiguous, not just untidy.
+    if (record.mobile) {
+        const mobileClash = await users$.findByMobile(record.mobile);
+        if (mobileClash) throw new Error(`${mobileClash.name} already uses that mobile number.`);
+    }
+
+    // Google self-provisions its own Firebase Auth identity on first sign-in
+    // (nothing to create here). Email/Password needs its Firebase Auth
+    // credential created explicitly, and before the Firestore document
+    // below — a failed Auth creation must never leave an orphaned
+    // authorization record with no way to actually sign in.
+    if (authMethods.includes('password')) {
+        if (!data.password) throw new Error('Set an initial password for this user.');
+        if (!record.email) throw new Error('An email address is required for Email & Password sign-in.');
+        await provisionEmailPasswordUser({ email: record.email, password: data.password });
+    }
 
     return users$.create(record);
 }
@@ -494,6 +529,35 @@ export async function updateUser(id, changes) {
 
     const existing = await users$.findOrFail(id);
     if (changes.role && !roleTable()[changes.role]) throw new Error('Choose a valid role.');
+
+    // Toggling which methods are *permitted* only — this never creates or
+    // links a Firebase Auth credential. Adding "password" here to an
+    // existing Google-only account permits it once a credential exists for
+    // that email (created at initial provisioning, or via account linking,
+    // which is a future milestone, not this one) — it does not create one.
+    if (changes.authMethods) {
+        const unknown = changes.authMethods.find((m) => !KNOWN_AUTH_METHODS.includes(m));
+        if (unknown) throw new Error(`"${unknown}" is not a recognised sign-in method.`);
+
+        if (!changes.authMethods.length) {
+            // The signed-in Administrator editing their own account gets a
+            // message naming their own situation specifically — everyone
+            // else gets the general rule. Both are the same underlying
+            // "an account may never have zero sign-in methods" rule; only
+            // the wording differs.
+            if (id === session.actorId()) {
+                throw new Error('At least one authentication method must remain enabled for your own account.');
+            }
+            throw new Error('Choose at least one sign-in method.');
+        }
+    }
+
+    // Same uniqueness rule as createUser() — checked here too since mobile
+    // can change on an existing account, not just at creation.
+    if ('mobile' in changes && changes.mobile) {
+        const mobileClash = await users$.findByMobile(changes.mobile);
+        if (mobileClash && mobileClash.id !== id) throw new Error(`${mobileClash.name} already uses that mobile number.`);
+    }
 
     // The school must not be able to lock itself out of administration —
     // Administrator is the sole full-access role in the combined model

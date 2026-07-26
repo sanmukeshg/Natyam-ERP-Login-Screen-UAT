@@ -1,40 +1,47 @@
 /**
  * NATYAM ERP 2.0 — AuthenticationService
  *
- * UI → AuthenticationService → AuthenticationProvider → Google Identity
- * Services → Session Service → Storage. This file is the "Authentication
- * Service" step: it knows *that* a sign-in happened and what to do about
- * it — provisioning, audit, the Firestore session record — but not *how*
- * one happens. That mechanics lives in js/services/auth/providers/, one
- * file per method, each returning the same normalised identity shape
- * (`{ email, name, provider }`). Adding Mobile+OTP later means adding a
- * provider file and a registry entry below, not touching anything else in
- * this file.
+ * UI → AuthenticationService → AuthenticationProvider → Firebase
+ * Authentication → Session Service → Storage. This file is the
+ * "Authentication Service" step: it knows *that* a sign-in happened and
+ * what to do about it — provisioning, audit, the Firestore session
+ * record — but not *how* one happens. That mechanics lives in
+ * js/services/auth/providers/, one file per method (Google, Password,
+ * Mobile OTP), each returning the same normalised identity shape
+ * (`{ email, name, provider }` — Mobile OTP carries `phoneNumber` instead
+ * of `email`, see resolveProvisionedUser()). A future provider is a new
+ * file and a registry entry below, not a change anywhere else in this file.
  *
- * Google Sign-In proves *identity* — Firebase Authentication verifies it
- * against a real Google account, a genuine security boundary. It does not
- * by itself prove *authorization*: whether that identity is allowed into
- * NATYAM at all is decided by `resolveProvisionedUser()` against the
- * Firestore `users` collection, matching the IAM workflow spec (§7, §19)
- * and Document 6 §22 ("only an Administrator creates users") — a
- * signed-in identity with no matching, active user record is turned away
- * with the same message whether the record doesn't exist, was archived,
- * or was deactivated, except where the spec allows a status to say more
- * (Account Disabled / Account Unavailable are statuses, not an identity
- * leak).
+ * Every provider proves *identity* — Firebase Authentication verifies it
+ * for real (a Google account, a password Firebase itself checks, an SMS
+ * code), a genuine security boundary. Proving identity does not by itself
+ * prove *authorization*: whether that identity is allowed into NATYAM at
+ * all, and whether it was allowed in *this particular way*, is decided by
+ * `resolveProvisionedUser()` against the Firestore `users` collection,
+ * matching the IAM workflow spec (§7, §19) and Document 6 §22 ("only an
+ * Administrator creates users") — a signed-in identity with no matching,
+ * active user record is turned away with the same message whether the
+ * record doesn't exist, was archived, or was deactivated, except where
+ * the spec allows a status to say more (Account Disabled / Account
+ * Unavailable are statuses, not an identity leak). Authentication and
+ * authorization are kept strictly separate: a role decides what a
+ * signed-in person may do; `users.authMethods` decides how they were
+ * allowed to sign in at all — two independent questions, never conflated.
  */
 
 import { session } from '../core/session.js';
 import { bus, EVENTS } from '../core/bus.js';
-import { users$ } from '../data/repositories.js';
+import { users$, authMethodsOf } from '../data/repositories.js';
 import { sessions$ } from '../data/sessions.repository.firestore.js';
 import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 import { googleProvider } from './auth/providers/googleProvider.js';
+import { passwordProvider } from './auth/providers/passwordProvider.js';
 import { mobileOtpProvider } from './auth/providers/mobileOtpProvider.js';
 
 /** Every AuthenticationProvider this app knows about, keyed by id. */
 const PROVIDERS = {
     [googleProvider.id]: googleProvider,
+    [passwordProvider.id]: passwordProvider,
     [mobileOtpProvider.id]: mobileOtpProvider
 };
 
@@ -59,7 +66,10 @@ async function writeAuditRow(entityId, action, detail, actor = null) {
 function providerIdOf(identity) {
     if (identity.provider) return identity.provider;
     const raw = identity.providerData?.[0]?.providerId || '';
-    return raw.includes('google') ? 'google' : 'unknown';
+    if (raw.includes('google')) return 'google';
+    if (raw === 'password') return 'password';
+    if (raw === 'phone') return 'mobile';
+    return 'unknown';
 }
 
 /**
@@ -105,15 +115,59 @@ async function endActiveSession(reason) {
 /**
  * Signs in through the named provider and runs the resulting identity
  * through the same provisioning check every provider shares.
- * @param {'google'|'mobile'} providerId
+ * @param {'google'|'password'|'mobile'} providerId
+ * @param {object} [payload] Forwarded to the provider's own signIn() —
+ *   `{email, password}` for `password`; ignored by `google` (and unused by
+ *   `mobile`, which is two-step — see sendMobileCode()/confirmMobileCode()
+ *   below, not this function).
  * @returns {Promise<object>} the app's own provisioned user record
  */
-export async function signIn(providerId) {
+export async function signIn(providerId, payload) {
     const provider = PROVIDERS[providerId];
     if (!provider) throw new Error(`Unknown sign-in method "${providerId}".`);
 
-    const identity = await provider.signIn();
+    const identity = await provider.signIn(payload);
     return resolveProvisionedUser(identity);
+}
+
+/**
+ * First step of Mobile OTP — sends the code, returns the confirmation
+ * handle confirmMobileCode() needs. Not routed through signIn() since OTP
+ * is two-step, unlike every other provider.
+ * @param {string} phoneNumber E.164 format.
+ */
+export async function sendMobileCode(phoneNumber) {
+    return mobileOtpProvider.sendCode(phoneNumber);
+}
+
+/**
+ * Second step of Mobile OTP — verifies the code, then runs the same
+ * provisioning check every provider shares.
+ * @param {import('firebase/auth').ConfirmationResult} confirmation
+ * @param {string} code
+ */
+export async function confirmMobileCode(confirmation, code) {
+    const identity = await mobileOtpProvider.confirmCode(confirmation, code);
+    return resolveProvisionedUser(identity);
+}
+
+/** "Forgot password?" — Firebase emails a reset link; this app never sees or handles the new password itself. */
+export async function requestPasswordReset(email) {
+    await passwordProvider.sendReset(email);
+}
+
+/**
+ * Administrator-only — creates the Firebase Auth credential for a new
+ * Email/Password user via passwordProvider's isolated secondary-App flow,
+ * then a Firebase-generated reset email so the person's first real action
+ * is choosing their own password. Does not write the Firestore `users`
+ * document itself — settings.service.js's createUser() calls this first,
+ * then writes that document, so a failed Auth creation never leaves an
+ * orphaned Firestore record.
+ * @param {{email: string, password: string}} account
+ */
+export async function provisionEmailPasswordUser({ email, password }) {
+    await passwordProvider.provisionAccount({ email, password });
 }
 
 /**
@@ -122,9 +176,10 @@ export async function signIn(providerId) {
  * (restoring an existing Firebase session on reload) — the same decision
  * either way, so there is exactly one place that makes it.
  *
- * @param {{email: string, name?: string, displayName?: string, provider?: string}} identity
- *   Either a provider's normalised identity or a raw Firebase User (both
- *   shapes carry `email`; the name field differs, so both are checked).
+ * @param {{email?: string, phoneNumber?: string, name?: string, displayName?: string, provider?: string}} identity
+ *   Either a provider's normalised identity or a raw Firebase User. Google
+ *   and Password identities carry `email`; Mobile OTP carries only
+ *   `phoneNumber` — see the email/phone branch below.
  * @returns {Promise<object>} the app's own user record (Firestore `users` doc)
  * @throws {Error} with a message safe to show on the login screen — the
  *   caller must sign back out of the underlying provider when this throws,
@@ -133,11 +188,18 @@ export async function signIn(providerId) {
  *   its own popup-level errors; app.js's restore path calls expireSession().)
  */
 export async function resolveProvisionedUser(identity) {
-    const email = identity.email;
-    const name = identity.name || identity.displayName || email;
+    const email = identity.email || null;
+    const name = identity.name || identity.displayName || email || identity.phoneNumber;
     const providerId = providerIdOf(identity);
 
-    const existing = await users$.findByEmail(email);
+    // Google and Password identities carry an email, matched against the
+    // email-keyed `users` doc exactly as before. Mobile OTP carries only a
+    // phone number — resolved via the `mobile` field on that same kind of
+    // doc instead (see users.repository.firestore.js's findByMobile()).
+    // Every account this resolves is still email-keyed; a phone number is
+    // a second way into an existing account, never a new identity model —
+    // see that method's own doc comment for the scope boundary.
+    const existing = email ? await users$.findByEmail(email) : await users$.findByMobile(identity.phoneNumber);
 
     if (existing) {
         if (existing.deletedAt) {
@@ -151,6 +213,18 @@ export async function resolveProvisionedUser(identity) {
             throw new Error('Account disabled. Ask an administrator to reactivate your account.');
         }
 
+        // Authentication and authorization stay separate: Firebase already
+        // proved this identity; this decides whether *this account* was
+        // ever configured to sign in *this way*. Administrator-controlled
+        // (authMethodsOf() has no fallback — a missing array denies every
+        // method, never assumes one), not a role check — a role decides
+        // what someone may do once in, not how they may get in.
+        if (!authMethodsOf(existing).includes(providerId)) {
+            await writeAuditRow(existing.id, 'login_failed', { reason: 'method_not_permitted', method: providerId }, existing);
+            bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'method_not_permitted' });
+            throw new Error('This authentication method is not enabled for your account. Please use one of your permitted sign-in methods or contact your Administrator.');
+        }
+
         await writeAuditRow(existing.id, 'login_succeeded', null, existing);
         bus.emit(EVENTS.LOGIN_SUCCEEDED, { userId: existing.id });
         await ensureSessionRecord(existing, providerId);
@@ -159,19 +233,28 @@ export async function resolveProvisionedUser(identity) {
 
     // No record at all. The only way in is the one-time bootstrap: the
     // very first sign-in this school ever makes becomes Administrator.
-    // Every sign-in after that fails the same way an unknown email always
-    // would.
-    try {
-        const admin = await users$.bootstrapAdministrator({ name, email, loginType: 'Google' });
-        await writeAuditRow(admin.id, 'login_succeeded', { bootstrap: true }, admin);
-        bus.emit(EVENTS.LOGIN_SUCCEEDED, { userId: admin.id, bootstrap: true });
-        await ensureSessionRecord(admin, providerId);
-        return admin;
-    } catch {
-        await writeAuditRow(email, 'login_failed', { email, reason: 'not_provisioned' });
-        bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'not_provisioned' });
-        throw new Error('Your account is not set up yet. Ask an administrator to add you as a user.');
+    // Every sign-in after that fails the same way an unknown identity
+    // always would. Bootstrap requires an email (see
+    // bootstrapAdministrator()'s validate()) — a phone-only identity with
+    // no matching account simply falls through to the rejection below,
+    // same as any other unrecognised sign-in.
+    if (email) {
+        try {
+            // `loginType` is deprecated (see users.repository.firestore.js) —
+            // deliberately not set from providerId here; authMethods is the
+            // one field that decides anything, for a bootstrap account same
+            // as any other.
+            const admin = await users$.bootstrapAdministrator({ name, email, authMethods: [providerId] });
+            await writeAuditRow(admin.id, 'login_succeeded', { bootstrap: true }, admin);
+            bus.emit(EVENTS.LOGIN_SUCCEEDED, { userId: admin.id, bootstrap: true });
+            await ensureSessionRecord(admin, providerId);
+            return admin;
+        } catch { /* falls through to the standard rejection below */ }
     }
+
+    await writeAuditRow(email || identity.phoneNumber, 'login_failed', { email, reason: 'not_provisioned' });
+    bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'not_provisioned' });
+    throw new Error('Your account is not set up yet. Ask an administrator to add you as a user.');
 }
 
 /** Ends the current session. Safe to call even if nothing is signed in. */

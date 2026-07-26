@@ -49,6 +49,7 @@ import {
     addStage, updateStage, removeStage, addLesson, updateLesson, removeLesson, moveNode
 } from '../../services/curriculum.service.js';
 import { search as searchAudit, describe as describeAudit, filterOptions, activitySummary } from '../../services/audit.service.js';
+import { authMethodsOf } from '../../data/repositories.js';
 import { backupStatus, downloadBackup, inspectBackup, restore, exportStore, resetEverything } from '../../services/backup.service.js';
 import { IMPORTERS, readFile, dryRun, commit } from '../../services/import.service.js';
 
@@ -975,7 +976,21 @@ export default class SettingsPage extends Page {
                     hint: 'Restricts what this person sees by default. They can still switch.'
                 },
                 { name: 'staffId', label: 'Linked staff record', width: 'half', value: user?.staffId,
-                  hint: 'Optional. Links a login to a teacher so their dashboard shows their own batches.' }
+                  hint: 'Optional. Links a login to a teacher so their dashboard shows their own batches.' },
+                {
+                    name: 'authMethods', label: 'Sign-in methods', type: 'checkbox-group', width: 'full',
+                    value: user ? authMethodsOf(user) : ['google'],
+                    options: [
+                        { value: 'password', label: 'Email & Password' },
+                        { value: 'google', label: 'Google' },
+                        { value: 'mobile', label: 'Mobile OTP' }
+                    ],
+                    hint: 'How this person may sign in. Separate from Role above, which decides what they may do once in.'
+                },
+                ...(!user ? [{
+                    name: 'password', label: 'Initial password', type: 'password', width: 'half',
+                    hint: 'Only used if Email & Password is checked above — the person gets a reset-password email right after creation.'
+                }] : [])
             ],
             onSubmit: async (values) => (user ? updateUser(user.id, values) : createUser(values))
         });

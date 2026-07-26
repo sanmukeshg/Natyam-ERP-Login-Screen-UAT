@@ -1,116 +1,79 @@
-# Release Notes — NATYAM ERP v2.15.0
+# Release Notes — NATYAM ERP v2.16.0
 
-**Release:** Audit Log Migration & Completion — the final Firestore migration
+**Release:** Phase 1 / Milestone A1 — Unified Authentication Platform (Email/Password + Google + Mobile OTP)
 **Date:** 26 July 2026
-**Baseline:** v2.14.0
-**Type:** Data-layer migration for the last remaining module, plus removal
-of one confirmed-dead helper function found during review. No redesign of
-what gets audited or how it's displayed.
+**Baseline:** v2.15.0
+**Type:** New authentication providers plus one new, Administrator-configurable permission layer (`authMethods`, the single source of truth — the older `loginType` field is now deprecated), a mobile-number-uniqueness rule, and a one-time migration for existing accounts. No change to IAM, roles, session management, or the Firestore data model beyond these additive fields.
 
 ---
 
 ## What changed for the academy
 
-### The audit trail now lives in the cloud
+### Three ways to sign in, not one
 
-Every action the app records — who created a student, collected a fee,
-marked attendance, edited a batch — now writes its audit entry to Cloud
-Firestore instead of just this browser's local storage. Nothing about
-what you see on the Audit Log screen, how filtering works, or how an
-activity is described has changed; only where the record is actually
-stored.
+The login screen now offers Email & Password (front and centre), Google Sign-In (unchanged, one step down), and Mobile OTP (a phone number and a text-message code). Nobody who signs in with Google today needs to do anything differently — that path is completely untouched.
 
-**This completes the migration.** As of this release, every module in
-NATYAM ERP — Students, Admissions, Attendance, Timetable, Programmes,
-Certificates, Batches, Staff, Fee Collection, Finance, Documents,
-Admission Drafts, Notifications, Branches, Academic Years, Curricula,
-Curriculum Levels, Holidays, and now the Audit Log — lives in Cloud
-Firestore. Nothing in the application's own data still depends on this
-browser's local storage.
+### Who can use which method is now something you control
 
-### A few extra spots found and fixed along the way
+Every Administrator-created account already had a Role. It now also has a set of allowed **sign-in methods** — Email & Password, Google, and/or Mobile OTP — configured on the same Add/Edit User screen. A person's Role still decides what they can do once they're in; this new setting decides how they're allowed to get in at all, and the two are kept completely separate on purpose. Every account that existed before this release keeps working exactly as it does today (Google), with nothing to reconfigure unless you want to add a method for someone.
 
-While retargeting the audit trail, four places were found writing audit
-entries by a slightly different path than the rest of the app: enrolling
-an applicant, moving a group of students between batches, signing in, and
-the two one-time data-migration tools used earlier in this project. All
-four now write through the same route as everything else, so no audit
-entry is left behind on the old local storage after this release.
+### Creating a new Email & Password user
+
+Adding a user with Email & Password now includes one more step: set an initial password. The new person gets a password-reset email right away, so their very first action is choosing their own password rather than using the one you typed in.
+
+### Forgot password
+
+A "Forgot password?" link on the login screen sends a reset email through Firebase — nobody, including this application, ever sees or handles the new password itself.
+
+### A few safety rules that are now enforced automatically
+
+- An account can never be saved with **zero** sign-in methods enabled — the option simply isn't allowed.
+- **You cannot lock yourself out.** If you're editing your own Administrator account, you can't remove every method from it — the system will stop you and explain why.
+- **Mobile numbers are unique.** The same mobile number can't be assigned to two active accounts, since Mobile OTP looks a person up by their number alone.
+- If someone tries to sign in with a method their account isn't permitted to use, they see a clear, plain-English message telling them so — never a raw technical error.
 
 ---
 
 ## For administrators / IT
 
-- **`firestore.rules` must be republished** — it now also covers
-  `auditLog`. Firebase Console → Firestore Database → Rules → paste the
-  current file → Publish.
-- **Who can see the audit trail is unchanged** — Administrator only,
-  exactly as before; the new Firestore rule enforces server-side what the
-  app already enforced in the interface. Every signed-in, active person
-  can still *write* an audit entry as a side effect of their own normal
-  work (collecting a fee, marking attendance, and so on), the same as
-  today.
-- **No data migrated automatically.** The `auditLog` collection starts
-  empty unless already populated by an earlier restore. Existing audit
-  history on this browser's local storage is untouched and still
-  readable there if needed, but new activity from this release onward
-  writes to Firestore only.
-- **No other module changed.** Every previously migrated screen continues
-  exactly as before.
+- **No `firestore.rules` republish required for this release** — verified directly; the new field this release adds to a user's record is already covered by the existing rule that lets an Administrator edit any user.
+- **Two Firebase Console settings must be turned on before this release works**, under Authentication → Sign-in method: **Email/Password** and **Phone**. Neither is a `firestore.rules` change, so this is a different tab than the one this project has republished rules to before — easy to miss if you're only thinking about rules.
+- **One migration step to run once, by hand**, from a signed-in Administrator's browser console — see `js/migrations/authMethodsMigration.js`'s own instructions. It gives every existing account an explicit list of allowed sign-in methods (Google, since that's the only one anyone has used so far) instead of leaving that unset. Nothing breaks if you don't run it right away, but it should be run before this release has been live very long — it's the one thing in this release that's a real data change, not just new code.
+- **Existing Google accounts are completely unaffected** by the release itself. No forced re-authentication, nothing to do for anyone already using Google — once the migration step above has run.
+- **A field called `loginType` on user records is now retired.** Nothing reads it anymore; it's left in place purely so nothing breaks that still expects it to exist. No action needed.
+- **Mobile OTP sign-in and SMS delivery could not be tested end-to-end in the development environment** — no real phone, no live SMS. It has been built and statically verified, but needs one real pass, on a real device, before you rely on it.
 
 ## Quality
 
-- Static analysis clean: no import cycles, all imports resolve, no
-  undefined identifiers.
-- Every one of the 20 files with a private audit-row writer (19
-  repositories plus the sign-in service), plus the 4 additional call
-  sites found during review, confirmed retargeted with no remaining
-  direct writes to the old local audit store.
-- The Audit Log screen, its filters, the dashboard's recent-activity
-  feed, and the CSV export all confirmed to call the same repository
-  methods with the same signatures as before — no logic changes needed
-  on the reading side.
+- Static analysis clean: no import cycles, all imports resolve, no undefined identifiers.
+- Every existing Google sign-in path, session restore, and route guard confirmed unchanged by direct code trace — the new providers are additive, not a rewrite of anything that already worked.
+- The login screen renders correctly and responsively at both desktop and mobile widths in this environment's browser preview; the three-method layout, the divider structure, and the two-step Mobile OTP form (phone number → send → code entry → verify) were all visually confirmed.
+- Confirmed in a live browser session (not just static reading of the code) that a real sign-in attempt against Firebase, before Email/Password and Phone are enabled in Console, now shows a plain, friendly message rather than the raw `Firebase: Error (auth/operation-not-allowed)` text an earlier version of this screen displayed.
 
-**Not verifiable from this environment:** actually performing an action
-and watching its audit entry appear requires being signed in with a real
-Google account in a real browser. The manual checklist below is what
-needs a real pass.
+**Not verifiable from this environment:** actually signing in with a real Google account, a real email/password credential, or a real phone number/SMS code all require a live, signed-in browser session against the real Firebase project. The manual checklist below is what needs a real pass.
 
 ## Manual UAT checklist
 
-- [ ] Publish the current `firestore.rules` (now including `auditLog`)
-      before testing anything else below.
-- [ ] Edit a record in at least three different modules (e.g. a student,
-      a fee payment, an attendance register) and confirm each produces a
-      correctly worded, correctly attributed entry on the Audit Log
-      screen.
-- [ ] Confirm the Audit Log's entity/action/date-range filters still
-      work, and the CSV export still downloads correctly.
-- [ ] Confirm the Dashboard's recent-activity feed still populates.
-- [ ] Enrol an applicant from Admissions and confirm an "enrolled" audit
-      entry appears.
-- [ ] Move a group of students to another batch (bulk reassign) and
-      confirm a "reassigned" audit entry appears.
-- [ ] Sign in and sign out, and confirm both produce audit entries.
-- [ ] As a non-Administrator account, confirm the Audit Log screen is not
-      reachable (this was already true client-side; confirm it holds
-      server-side too).
-- [ ] Take a backup and confirm it includes an `auditLog` section;
-      restore it and confirm the entries come back with their original
-      ids and timestamps intact.
+- [ ] Turn on Email/Password and Phone sign-in methods in Firebase Console (Authentication → Sign-in method) before testing anything else below.
+- [ ] Run the one-time `authMethods` migration (`js/migrations/authMethodsMigration.js`) with `dryRun: true` first, inspect the report, then re-run with `dryRun: false`. Confirm every existing user record now has `authMethods: ["google"]`.
+- [ ] Sign in with an existing (now-migrated) Google account — confirm it behaves exactly as before.
+- [ ] As an Administrator, add a new user with Email & Password enabled and an initial password — confirm the new person can sign in, and confirm your own Administrator session was completely undisturbed by the creation.
+- [ ] Confirm the newly created person receives a password-reset email and can set their own password.
+- [ ] Sign in with Email & Password using a configured account.
+- [ ] Click "Forgot password?", confirm the reset email arrives and works.
+- [ ] Enable Mobile OTP for a test account with a real phone number; sign in with it end to end (send code, receive SMS, verify).
+- [ ] Try creating or editing a user with a mobile number already in use by another active account — confirm it's rejected with a clear message.
+- [ ] Try saving a user with every sign-in method unchecked — confirm it's rejected.
+- [ ] As the signed-in Administrator, try removing every sign-in method from your own account — confirm it's specifically rejected with a message about your own account, not the generic message.
+- [ ] As an Administrator, uncheck a method for a *different* test account and confirm signing in with that method now shows: *"This authentication method is not enabled for your account. Please use one of your permitted sign-in methods or contact your Administrator"* — not a raw Firebase error — while the account's other allowed methods still work.
+- [ ] Attempt a sign-in with a wrong password / bad OTP code and confirm the message shown is plain language, not a raw `Firebase: Error (auth/...)` string.
+- [ ] Confirm session persistence across a page reload for all three methods, and that logout works for all three.
+- [ ] Confirm route guards still redirect an unauthenticated visit to the login screen.
 
 ## Known issues
 
-None introduced by this release. See v2.4.0's through v2.14.0's release
-notes for trade-offs carried forward from earlier migrations.
-`backup.service.js`'s `resetEverything()` still only clears IndexedDB
-stores, not their Firestore equivalents — a pre-existing gap across all
-24 collections, not something this release introduces or worsens.
+None introduced by this release. Account linking (letting one existing Google user also add a password to the same account) is explicitly not part of this release — see `docs/architecture/AUTHENTICATION_PROVIDERS.md` §6 for the roadmap. See v2.4.0's through v2.15.0's release notes for trade-offs carried forward from earlier work.
 
 ## Upgrade
 
-Replace the application files, **and publish the updated
-`firestore.rules`** — this release does not work without it. No
-IndexedDB migration is required for any other module; only the audit
-trail's data source changes. This is the last data-layer migration
-planned for this project.
+Replace the application files, **and turn on Email/Password + Phone sign-in methods in Firebase Console** — this release does not work without both enabled. No `firestore.rules` republish is required this time. No IndexedDB migration is required for any other module.

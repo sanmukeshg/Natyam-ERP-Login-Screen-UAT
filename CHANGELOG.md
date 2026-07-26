@@ -9,6 +9,34 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.16.0] — 2026-07-26 — Unified Authentication Platform (Email/Password + Google + Mobile OTP)
+
+Phase 1 / Milestone A1. Three authentication providers now share the login screen — Google Sign-In (unchanged), Email & Password, and Mobile OTP — with per-account, Administrator-configurable permissions deciding which methods a given user may actually sign in with. IAM, roles, session management, and the Firestore data model are unchanged; this is additive.
+
+### Added
+- **`js/services/auth/providers/passwordProvider.js`** — Firebase `signInWithEmailAndPassword`. Passwords are verified by Firebase's servers, never this app's own code — the same trust model Google Sign-In already had, and deliberately not a repeat of the client-verified password design ADR-014 removed. Also provides `sendReset()` (Forgot Password) and `provisionAccount()` (Administrator-side account creation via a throwaway secondary Firebase App instance, so creating another user's credential never disturbs the Administrator's own signed-in session).
+- **`js/services/auth/providers/mobileOtpProvider.js`** — rebuilt from a stub into a real Firebase Phone Authentication implementation: `sendCode(phoneNumber)` (invisible reCAPTCHA + SMS) and `confirmCode(confirmation, code)`, a deliberate two-step extension of the one-shot provider contract Google/Password use.
+- **`users.authMethods`** (new Firestore field, array) — **the single source of truth** for which sign-in methods a specific account may use, Administrator-configured in Settings → Users (reusing the existing `checkbox-group` field type — no new UI component). No runtime default is ever assumed for a missing array (see Changed, below) — every account is expected to carry a real one, backfilled once by a new migration utility.
+- **`js/migrations/authMethodsMigration.js`** — one-time, by-hand migration (same category as this project's two existing data-migration tools, no route or UI button) that backfills `authMethods: ['google']` onto every `users` document that predates this field. Replaces an earlier runtime-fallback approach that was reconsidered before shipping: a missing array is now a data gap closed once, for real, not something the sign-in path silently guesses around forever.
+- **`js/data/users.repository.firestore.js`**: `authMethodsOf(user)` (returns `[]`, not a default, for a record with no array — see Changed) and `findByMobile(mobile)` (a phone-keyed lookup for Mobile OTP identities, which carry no email; also the basis of the new mobile-uniqueness check below).
+- Unified, responsive login screen (`js/modules/auth/login.page.js`): Email/Password + Login (primary) → Continue with Google → Mobile Number + Send OTP/Verify, plus a "Forgot password?" link. All three funnel into the same outcome handling app.js's `onAuthStateChanged` listener already provides. Raw Firebase SDK error codes are never shown to a person — a new `friendlyAuthError()` translates every code this screen can produce into plain, non-technical language.
+
+### Changed
+- **`resolveProvisionedUser()`** (`auth.service.js`) gains one new gate, run after the existing status/archived checks: the signed-in identity's provider must appear in `authMethodsOf(existing)`, or the sign-in is rejected with the fixed message *"This authentication method is not enabled for your account. Please use one of your permitted sign-in methods or contact your Administrator,"* and an audited `method_not_permitted` reason — authentication (Firebase proved who they are) and authorization (role — what they may do) stay strictly separate; this is a third, independent check, not a blend of the two. Also branches on identity shape: an email resolves against the existing email-keyed lookup; a phone-only identity (Mobile OTP) resolves via the new `findByMobile()`.
+- **`loginType` is now deprecated.** It remains on every document for shape/backward-compatibility only — no code reads it for any decision. The bootstrap path (first-ever sign-in on a brand-new project) no longer derives it from the signing-in provider at all (an earlier version of this milestone did; reconsidered as exactly the kind of new logic the deprecation is meant to prevent). `authMethods` is the only field anything checks.
+- **`authMethodsOf()` no longer defaults a missing array to `['google']`.** It returns an empty array instead — failing closed (no method permitted) rather than open (a default method assumed permitted). `createUser()`/`updateUser()` mirror this: neither ever injects a default: an Administrator must explicitly choose at least one method for every account, with no fallback to fall back to.
+- `settings.service.js`'s `createUser()`/`updateUser()` validate `authMethods` against the three known values and now enforce `authMethods.length >= 1` explicitly (an account can never be saved with zero enabled methods) — with a distinct message when the signed-in Administrator is editing their own account down to zero, preventing self-lockout specifically. `createUser()` calls the secondary-App provisioning flow before writing the Firestore document whenever Email & Password is selected for a brand-new account, so a failed Auth-account creation never leaves an orphaned authorization record.
+- **Mobile numbers are now unique across the system**, enforced in both `createUser()` and `updateUser()` via `findByMobile()` — required because Mobile OTP resolves an incoming identity by phone number alone, so two active accounts sharing one number would make that resolution ambiguous.
+
+### Notes
+- **No `firestore.rules` change required** — confirmed directly: `authMethods` is just another field on `/users/{userId}`, already covered by the existing Administrator-only update rule.
+- **Firebase Console manual steps needed** (separate from any rules republish): enable the Email/Password and Phone sign-in methods under Authentication → Sign-in method.
+- **The one-time `authMethods` migration has not been run against any live data from this environment** — no write access to a real Firestore project here. `js/migrations/authMethodsMigration.js`'s own header documents exactly how to run it, once, from a signed-in Administrator's browser.
+- **Account linking (Google ↔ Password) is explicitly out of scope** — existing Google-only accounts are completely unaffected; a future milestone may add self-service linking.
+- **Mobile OTP could not be end-to-end verified in the development environment** (no real phone/SMS delivery, reCAPTCHA needs a live browser session) — static/code-level verification only; a real-device pass is required before relying on it in production.
+
+---
+
 ## [2.15.0] — 2026-07-26 — Audit Log Migration & Completion (final migration)
 
 The last entity off IndexedDB. All 24 entities in NATYAM ERP are now on

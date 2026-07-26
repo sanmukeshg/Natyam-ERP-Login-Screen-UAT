@@ -256,7 +256,7 @@ export { certificates$ } from './certificates.repository.firestore.js';
 export { documents$ } from './documents.repository.firestore.js';
 export { notifications$ } from './notifications.repository.firestore.js';
 export { audit$ } from './auditLog.repository.firestore.js';
-export { users$ } from './users.repository.firestore.js';
+export { users$, authMethodsOf } from './users.repository.firestore.js';
 export { curricula$ } from './curricula.repository.firestore.js';
 export { curriculumLevels$ } from './curriculumLevels.repository.firestore.js';
 

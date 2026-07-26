@@ -39,6 +39,29 @@ function emailId(email) {
     return String(email || '').trim().toLowerCase();
 }
 
+/** Collapses whitespace and keeps only digits and a leading +. Same rule students/staff repositories use. */
+function normalisePhone(value) {
+    if (!value) return null;
+    const cleaned = String(value).replace(/[^\d+]/g, '');
+    return cleaned || null;
+}
+
+/**
+ * Which sign-in methods this account may use — the single source of
+ * truth for authentication permission (see resolveProvisionedUser() in
+ * auth.service.js). `authMethods` is expected to be present on every
+ * account: js/migrations/authMethodsMigration.js is the one-time,
+ * by-hand utility that backfills it for every record that predates this
+ * field, so this accessor deliberately does NOT default a missing array
+ * to `['google']` or anything else — that would be exactly the kind of
+ * runtime fallback this design avoids. A record with no array here
+ * returns an empty one and is therefore permitted *no* sign-in method
+ * until it's migrated — failing closed, never open.
+ */
+export function authMethodsOf(user) {
+    return Array.isArray(user?.authMethods) ? user.authMethods : [];
+}
+
 class FirestoreUserRepository {
     /* ---------------------------------------------------------------- READS */
 
@@ -72,6 +95,23 @@ class FirestoreUserRepository {
         return this.find(emailId(email));
     }
 
+    /**
+     * Phone-only identities (Mobile OTP) carry no email — resolved by the
+     * `mobile` field instead. Single equality query, no composite index
+     * needed, same shape as every other repository's findByX(). Every
+     * account this resolves is still an email-keyed `users` doc; Mobile
+     * OTP is a second way into an existing account, not a new identity
+     * model (see js/services/auth.service.js's resolveProvisionedUser()).
+     */
+    async findByMobile(mobile) {
+        const normalised = normalisePhone(mobile);
+        if (!normalised) return null;
+        const snap = await getDocs(query(usersCollection, where('mobile', '==', normalised)));
+        if (snap.empty) return null;
+        const row = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        return visible(row) ? row : null;
+    }
+
     async findByCode(code) {
         const q = String(code || '').trim().toUpperCase();
         if (!q) return null;
@@ -99,8 +139,20 @@ class FirestoreUserRepository {
             ...data,
             email: id,
             status: data.status || 'active',
-            mobile: data.mobile ?? null,
+            mobile: normalisePhone(data.mobile),
+            // DEPRECATED — retained only so older records/exports keep their
+            // shape; no code reads this field for any decision anymore.
+            // `authMethods` is the single source of truth (see
+            // authMethodsOf()). Not derived from `authMethods` here on
+            // purpose — deriving one deprecated field from the field that
+            // replaced it is exactly the kind of "new logic" the
+            // deprecation is meant to stop accumulating.
             loginType: data.loginType || 'Google',
+            // No default injected here — settings.service.js's createUser()
+            // already rejects a missing/empty array before this is ever
+            // reached (see KNOWN_AUTH_METHODS validation there); the
+            // repository trusts that validation rather than re-deciding it.
+            authMethods: Array.isArray(data.authMethods) ? data.authMethods : [],
             createdAt: at, createdBy: actor,
             updatedAt: at, updatedBy: actor,
             deletedAt: null
@@ -121,6 +173,7 @@ class FirestoreUserRepository {
         const patch = { ...changes, updatedAt: nowISO(), updatedBy: session.actorId() };
         delete patch.id;
         delete patch.email;
+        if ('mobile' in patch) patch.mobile = normalisePhone(patch.mobile);
 
         await updateDoc(doc(firestore, COLLECTION_NAME, id), patch);
         return { ...existing, ...patch, id };
@@ -159,8 +212,9 @@ class FirestoreUserRepository {
             email: id,
             role: 'administrator',
             status: 'active',
-            mobile: data.mobile ?? null,
-            loginType: data.loginType || 'Google',
+            mobile: normalisePhone(data.mobile),
+            loginType: data.loginType || 'Google', // DEPRECATED — see create()'s comment; authMethods is the source of truth.
+            authMethods: Array.isArray(data.authMethods) ? data.authMethods : [],
             createdAt: at, createdBy: id,
             updatedAt: at, updatedBy: id,
             deletedAt: null
