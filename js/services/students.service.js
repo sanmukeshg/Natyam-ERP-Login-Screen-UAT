@@ -28,6 +28,26 @@ import {
 } from '../data/repositories.js';
 import { studentFeeSummary, raiseSchedule } from './fees.service.js';
 
+/**
+ * Milestone P1 (Parent/Student Portal): the read-only snapshot mirrored onto
+ * a student's own `batchSchedule` field so the portal's guardian-scoped read
+ * of the `students` document is enough to show a timetable — `batches` has
+ * no reverse index from student to batch, and Firestore rules can't express
+ * that lookup, so the schedule travels with the student instead. `null` for
+ * a student not currently assigned to any batch.
+ */
+export function batchScheduleOf(batch) {
+    if (!batch) return null;
+    return {
+        batchId: batch.id,
+        name: batch.name,
+        level: batch.level,
+        days: batch.days,
+        startTime: batch.startTime,
+        endTime: batch.endTime
+    };
+}
+
 /* ==========================================================================
    ENROLMENT
    ========================================================================== */
@@ -60,7 +80,8 @@ export async function enrol(data, { raiseFees = true } = {}) {
         branchId: batch?.branchId || data.branchId,
         level: batch?.level || data.level,
         status: data.status || STUDENT_STATUS.ACTIVE,
-        joinedOn: data.joinedOn || localDate()
+        joinedOn: data.joinedOn || localDate(),
+        batchSchedule: batchScheduleOf(batch)
     });
 
     let billing = null;
@@ -97,7 +118,7 @@ export async function assignToBatch(studentId, batchId) {
 
     const student = await students$.findOrFail(studentId);
     if (!batchId) {
-        const cleared = await students$.update(studentId, { batchId: null });
+        const cleared = await students$.update(studentId, { batchId: null, batchSchedule: null });
         bus.emit(EVENTS.STUDENT_UPDATED, { student: cleared, before: student });
         return cleared;
     }
@@ -113,7 +134,7 @@ export async function assignToBatch(studentId, batchId) {
         );
     }
 
-    const updated = await students$.update(studentId, { batchId, branchId: batch.branchId });
+    const updated = await students$.update(studentId, { batchId, branchId: batch.branchId, batchSchedule: batchScheduleOf(batch) });
     bus.emit(EVENTS.STUDENT_UPDATED, { student: updated, before: student });
     return updated;
 }

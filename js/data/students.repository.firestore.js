@@ -22,6 +22,19 @@
  * so no caller needs to ask for it. `admissionNo` is unchanged and kept
  * alongside it: it is the Admissions module's own reference number, not an
  * ERP-wide identifier — see docs/migrations/STUDENT_MODULE_MIGRATION.md.
+ *
+ * Milestone P1 (Parent/Student Portal): two read-only, denormalized fields —
+ * `batchSchedule: {batchId, name, level, days, startTime, endTime}` and
+ * `programmes: [{programId, title, type, date, venue}]`. Neither is written
+ * here; this repository just carries whatever it's given, the same as every
+ * other field. They exist so the portal's guardian-scoped `firestore.rules`
+ * read of a `students` doc (see js/services/portal/guardianAuth.service.js)
+ * never needs a second, unscopeable read of `batches`/`programs` — those two
+ * collections have no reverse index from student to batch/programme, and
+ * Firestore rules cannot express that lookup. Kept in sync by
+ * students.service.js's assignToBatch()/enrol(), batches.service.js's
+ * updateBatch() (refreshing every current roster member), and
+ * programs.service.js's setParticipants().
  */
 
 import {
@@ -44,11 +57,21 @@ function visible(record) {
     return record && !record.deletedAt;
 }
 
-/** Collapses whitespace and keeps only digits and a leading +. Same rule the old repository used. */
+/**
+ * Collapses whitespace, keeps only digits and a leading +, and defaults to
+ * +91 for a bare number — matching users.repository.firestore.js's
+ * normalisePhone() exactly. Guardian phones must land in the same E.164
+ * shape Firebase Phone Auth's token claim uses, or a guardian's own number
+ * (typed without a country code, as most people do) never matches at
+ * sign-in — the same class of bug already found and fixed once for staff
+ * Mobile OTP, now fixed here before the Parent/Student Portal depends on it.
+ */
 function normalisePhone(value) {
     if (!value) return null;
-    const cleaned = String(value).replace(/[^\d+]/g, '');
-    return cleaned || null;
+    const digits = String(value).replace(/[^\d+]/g, '');
+    if (!digits) return null;
+    if (digits.startsWith('+')) return digits;
+    return `+91${digits.replace(/^0+/, '')}`;
 }
 
 function searchKeyOf(record) {

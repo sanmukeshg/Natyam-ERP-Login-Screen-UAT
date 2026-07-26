@@ -19,6 +19,7 @@ import { LEVELS, levelLabel } from '../config/app.config.js';
 import { batches$, students$, staff$, attendance$, branches$, AttendanceMath } from '../data/repositories.js';
 import { markedSessions } from './attendance.service.js';
 import { sessionMap } from './session.service.js';
+import { batchScheduleOf } from './students.service.js';
 
 export const WEEK = Object.freeze(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
 
@@ -126,6 +127,21 @@ export async function updateBatch(id, changes, { allowConflicts = false } = {}) 
 
     const batch = await batches$.update(id, candidate);
     bus.emit(EVENTS.BATCH_UPDATED, { batch, before: existing });
+
+    // Milestone P1 (Parent/Student Portal): every currently enrolled student
+    // carries a copy of this batch's own schedule (see students.service.js's
+    // batchScheduleOf()), since the portal can only read a guardian's own
+    // `students` doc, not `batches` directly. A reschedule here must refresh
+    // every enrolled family's copy, not just a newly-assigned student's —
+    // best-effort and isolated from the batch update itself succeeding,
+    // matching app.js's maintenance() pattern for non-fatal housekeeping.
+    try {
+        const roster = await students$.byBatch(id);
+        await Promise.all(roster.map((s) => students$.update(s.id, { batchSchedule: batchScheduleOf(batch) })));
+    } catch (err) {
+        console.error('Failed to refresh batchSchedule on enrolled students after a batch update', err);
+    }
+
     return { batch, conflicts };
 }
 

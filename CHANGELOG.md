@@ -9,6 +9,27 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.0] — 2026-07-26 — Parent/Student Portal (Milestone P1)
+
+A guardian can now sign in and see, read-only, exactly their own child's own batch, timetable, attendance rate (week/month), programmes, certificates, and fee dues — never another family's data, never a staff/finance/admin screen, and no payment-collection UI anywhere in it. This is the milestone `mobileOtpProvider.js`'s own header comment anticipated when it was built for Milestone A1.
+
+### Added
+- **A guardian identity needs no new role, `users` document, or top-level collection** — it's simply an authenticated Firebase user (Mobile OTP, Google, or Email/Password) whose phone/email token claim matches an existing `guardianPhone`/`guardianEmail` on one or more active `students` records. Matches this project's own long-standing design stance (`students.service.js`'s header comment: "there is no parent portal, no parent login, no parent record that outlives the child's enrolment").
+- **`js/services/portal/guardianAuth.service.js`** — `resolveGuardianIdentity()` (tried in `app.js` only as a fallback after the staff `resolveProvisionedUser()` path rejects an identity as genuinely unrecognised — `err.code === 'not_provisioned'`, never for an archived/inactive/method-not-permitted staff account), built on a from-scratch, permission-scoped query — deliberately not `students.service.js`'s existing `households()`, which is a whole-school, unscoped scan.
+- **`js/ui/portalShell.js` + six new portal pages** (`js/modules/portal/*.page.js`) — Overview, Timetable, Attendance, Programmes, Certificates, Fees. No branch switcher, no capability-filtered nav, no admin footer, no search palette, no notification bell — access is already fully scoped by `firestore.rules`, not by capability strings.
+- **`firestore.rules`**: `isGuardianOfStudent()`/`isGuardianOfStudentId()`, additive `||` branches on `students`/`attendance`/`certificates`/`invoices`/`payments`' existing `allow read` — every write rule and every other collection is untouched. A `hasEmailClaim()` guard was also added ahead of `isProvisionedActiveUser()`, since a phone-only guardian token has no `email` claim at all and the existing `myEmail()` throws (not `false`) without it.
+- **`js/core/router.js`**: the `Router` class is now exported (previously only the `router` singleton), and its per-navigation live-status re-check is pluggable (`revalidate`, defaulting to the exact existing `users$.find(...)` check) — a guardian session has no `users` doc, so the portal runs its own `Router` instance with `guardianSession.stillValid()` instead.
+- **Denormalized, read-only snapshots on the student document** — `batchSchedule` and `programmes` — since `batches`/`programs` have no reverse index back to a student and Firestore rules can't express that lookup. Kept in sync by `students.service.js`'s `assignToBatch()`/`enrol()`, `batches.service.js`'s `updateBatch()` (refreshing every current roster member, not just newly-assigned ones), and `programs.service.js`'s `setParticipants()`.
+
+### Fixed
+- **`students.repository.firestore.js`'s `normalisePhone()`** didn't default to `+91` the way `users.repository.firestore.js`'s version does — a guardian phone entered as bare digits would never match Firebase Phone Auth's E.164 claim. Same class of bug already found and fixed once for staff Mobile OTP (v2.16.1), now fixed here too, before this milestone could depend on it.
+
+### Manual steps before this works
+- **A one-time backfill** is needed for any `guardianPhone` already stored without `+91` — see `docs/migrations/PARENT_STUDENT_PORTAL_MILESTONE.md`.
+- **The updated `firestore.rules` must be republished** (Firebase Console → Firestore Database → Rules, or `firebase deploy --only firestore:rules`) and should be exercised in the Firebase Rules Emulator first — this file is hand-written and not yet under automated test.
+
+---
+
 ## [2.16.1] — 2026-07-26 — Self-Service Account Linking + India Phone Default
 
 Direct follow-up to v2.16.0, prompted by real usage during rollout: the existing (Google-only) Administrator account had no way to add Email & Password, and typing `+91` on every Mobile OTP sign-in was unnecessary friction for an all-Indian user base.

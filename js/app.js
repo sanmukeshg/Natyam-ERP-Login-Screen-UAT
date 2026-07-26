@@ -30,10 +30,11 @@
 
 import { db } from './core/db.js';
 import { session } from './core/session.js';
-import { router } from './core/router.js';
+import { router, Router } from './core/router.js';
 import { bus, EVENTS } from './core/bus.js';
 import { ROUTES, SESSION } from './config/app.config.js';
 import { Shell, applyTheme, applyDensity } from './ui/shell.js';
+import { PortalShell, PORTAL_NAVIGATION } from './ui/portalShell.js';
 import { commandPalette } from './ui/palette.js';
 import { toast } from './ui/toast.js';
 import { seedIfEmpty } from './data/seed.js';
@@ -44,6 +45,22 @@ import { refreshAlerts } from './services/notifications.service.js';
 import { renderLogin } from './modules/auth/login.page.js';
 import { watchAuthState } from './core/firebase.js';
 import { resolveProvisionedUser, expireSession, acknowledgeRemoteSignOut } from './services/auth.service.js';
+import { resolveGuardianIdentity, guardianSession } from './services/portal/guardianAuth.service.js';
+
+/**
+ * Milestone P1's Parent/Student Portal — the six read-only pages, each a
+ * default export matching every staff page's shape (Page subclass with
+ * render()). Lazy-imported the same way ROUTES' staff pages are, so a
+ * guardian's tab never downloads a single staff module and vice versa.
+ */
+const PORTAL_PAGES = {
+    '/portal': () => import('./modules/portal/overview.page.js'),
+    '/portal/timetable': () => import('./modules/portal/timetable.page.js'),
+    '/portal/attendance': () => import('./modules/portal/attendance.page.js'),
+    '/portal/programmes': () => import('./modules/portal/programmes.page.js'),
+    '/portal/certificates': () => import('./modules/portal/certificates.page.js'),
+    '/portal/fees': () => import('./modules/portal/fees.page.js')
+};
 
 // A one-shot flag carried across the reload that follows an idle sign-out,
 // so the login screen can explain why the person is looking at it. Session
@@ -98,6 +115,7 @@ async function handleAuthStateChange(firebaseUser) {
             return;
         }
         session.destroySession();
+        guardianSession.destroySession();
         showLoginScreen();
         return;
     }
@@ -108,9 +126,27 @@ async function handleAuthStateChange(firebaseUser) {
         appEntered = true;
         await enterApp();
     } catch (err) {
-        // Not provisioned, inactive, or archived. Sign the Firebase user
-        // back out — that re-fires this function with null, which shows
-        // the login screen again; this is what it reads to explain why.
+        // Milestone P1 — Parent/Student Portal: tried only for a genuinely
+        // unrecognised identity (err.code === 'not_provisioned', set by
+        // auth.service.js), never for an archived/inactive/method-not-
+        // permitted rejection above — those are real staff accounts being
+        // correctly turned away, not "maybe a guardian." Also never reached
+        // for the one-time bootstrap-Administrator path, since that
+        // succeeds (no error) on a genuinely empty `users` collection.
+        if (err.code === 'not_provisioned') {
+            const guardian = await resolveGuardianIdentity(firebaseUser).catch(() => null);
+            if (guardian) {
+                guardianSession.hydrate(guardian);
+                appEntered = true;
+                await enterPortal();
+                return;
+            }
+        }
+
+        // Not provisioned, inactive, or archived, and not a guardian either.
+        // Sign the Firebase user back out — that re-fires this function
+        // with null, which shows the login screen again; this is what it
+        // reads to explain why.
         pendingLoginMessage = err.message;
         await expireSession().catch(() => {});
     }
@@ -156,6 +192,32 @@ async function enterApp() {
 
     watchIdleSession();
     maintenance();
+}
+
+/**
+ * Milestone P1 — Parent/Student Portal. Mirrors enterApp()'s structure but
+ * mounts PortalShell on a fresh Router instance instead of the shared staff
+ * `router` singleton — a guardian session has no `users` doc, so the staff
+ * router's own live-status re-check (users$.find(...)) would fail every
+ * navigation; this Router supplies guardianSession.stillValid() instead
+ * (see js/core/router.js's pluggable `revalidate`). No command palette, no
+ * idle-timer, no maintenance sweep — those are staff/ops concerns the
+ * portal has no need of.
+ */
+async function enterPortal() {
+    const root = document.querySelector('#app');
+    const portalRouter = new Router({ revalidate: () => guardianSession.stillValid() });
+    const shell = new PortalShell(root, { router: portalRouter });
+    const viewport = shell.mount();
+
+    for (const item of PORTAL_NAVIGATION) {
+        portalRouter.register(item.path, { load: PORTAL_PAGES[item.path], title: item.label });
+    }
+
+    portalRouter.mount(viewport).start();
+
+    document.querySelector('#boot')?.remove();
+    bus.emit(EVENTS.APP_READY);
 }
 
 /**

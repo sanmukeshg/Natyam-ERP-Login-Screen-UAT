@@ -185,6 +185,37 @@ export async function setParticipants(id, studentIds) {
         participantCount: ids.length
     });
 
+    // Milestone P1 (Parent/Student Portal): mirror this programme onto every
+    // newly-added student's own `programmes` snapshot, and drop it from
+    // anyone removed. `programs` has no reverse index from student to
+    // programme (participation is an array on the programme, not a foreign
+    // key on the student), and Firestore rules can't express an
+    // array-membership lookup — so the portal reads this off the
+    // (already guardian-scoped) student document instead. Best-effort and
+    // isolated from the participant-list update itself succeeding, matching
+    // batches.service.js's updateBatch() roster refresh.
+    try {
+        const before = new Set(program.participants || []);
+        const studentById = new Map(ids.map((sid, i) => [sid, students[i]]));
+        const added = ids.filter((sid) => !before.has(sid));
+        const removed = (program.participants || []).filter((sid) => !ids.includes(sid));
+        const entry = { programId: id, name: updated.name, type: updated.type, date: updated.date, venue: updated.venue };
+
+        await Promise.all([
+            ...added.map((sid) => {
+                const programmes = (studentById.get(sid).programmes || []).filter((p) => p.programId !== id);
+                return students$.update(sid, { programmes: [...programmes, entry] });
+            }),
+            ...removed.map(async (sid) => {
+                const student = await students$.find(sid);
+                if (!student) return;
+                return students$.update(sid, { programmes: (student.programmes || []).filter((p) => p.programId !== id) });
+            })
+        ]);
+    } catch (err) {
+        console.error('Failed to sync the programmes snapshot onto students', err);
+    }
+
     bus.emit(EVENTS.PROGRAM_UPDATED, { program: updated, before: program });
     return updated;
 }

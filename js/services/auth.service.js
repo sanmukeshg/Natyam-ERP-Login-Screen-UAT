@@ -274,7 +274,14 @@ export async function resolveProvisionedUser(identity) {
 
     await writeAuditRow(email || identity.phoneNumber, 'login_failed', { email, reason: 'not_provisioned' });
     bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'not_provisioned' });
-    throw new Error('Your account is not set up yet. Ask an administrator to add you as a user.');
+    // Marked (not just message-matched) so app.js can safely try the
+    // Parent/Student Portal's guardian fallback (Milestone P1) only for
+    // this specific case — a genuinely unrecognised identity — and never
+    // for an archived/inactive/method-not-permitted rejection above, which
+    // is a real staff account being correctly turned away.
+    const err = new Error('Your account is not set up yet. Ask an administrator to add you as a user.');
+    err.code = 'not_provisioned';
+    throw err;
 }
 
 /** Ends the current session. Safe to call even if nothing is signed in. */

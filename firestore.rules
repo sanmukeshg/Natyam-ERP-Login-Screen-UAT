@@ -25,6 +25,14 @@
 // defined in js/config/app.config.js's `ROLES` table; this file does not
 // re-decide who can do what, only enforces it server-side.
 //
+// Milestone P1 added a second, unrelated identity: a Parent/Student Portal
+// guardian, who has no /users doc and no role at all — just an authenticated
+// caller whose phone/email token claim matches a guardianPhone/guardianEmail
+// already on file for one or more active students (isGuardianOfStudent()/
+// isGuardianOfStudentId() below). This only ever widens `allow read` on
+// students/attendance/certificates/invoices/payments; every write rule and
+// every other collection's rules are unchanged.
+//
 // Everything outside `users`/`meta`/`sessions`/`students`/`admissions`/
 // `attendance`/`classSessions`/`programs`/`certificates`/`batches`/`staff`/
 // `feePlans`/`invoices`/`payments`/`ledgerEntries`/`expenses`/`salaries`/
@@ -55,6 +63,15 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(myEmail()));
     }
 
+    // A phone-only caller (Milestone P1's Parent/Student Portal — no linked
+    // email at all) has no `email` token claim, and myEmail() calling
+    // .lower() on a missing claim throws — checked first, same reasoning as
+    // exists()-before-get() below: an unguarded check here would poison
+    // isProvisionedActiveUser() for every guardian caller.
+    function hasEmailClaim() {
+      return signedIn() && 'email' in request.auth.token && request.auth.token.email != null;
+    }
+
     // exists() must come first: on a first-ever sign-in the caller has no
     // /users doc yet, and reading .data off get() of a document that
     // doesn't exist throws — which, unguarded, poisons any check built on
@@ -63,6 +80,7 @@ service cloud.firestore {
     // to "no role" rather than erroring.
     function isProvisionedActiveUser() {
       return signedIn()
+        && hasEmailClaim()
         && exists(/databases/$(database)/documents/users/$(myEmail()))
         && callerDoc().data.status == 'active'
         && callerDoc().data.deletedAt == null;
@@ -131,6 +149,34 @@ service cloud.firestore {
         .hasOnly(['deletedAt', 'deletedBy', 'updatedAt', 'updatedBy']);
     }
 
+    // Milestone P1 — Parent/Student Portal. A guardian has no /users doc and
+    // no role: their identity is just an authenticated caller whose phone or
+    // email token claim matches a guardianPhone/guardianEmail already on
+    // file for one or more active students (see
+    // docs/migrations/PARENT_STUDENT_PORTAL_MILESTONE.md and
+    // js/services/portal/guardianAuth.service.js). No new collection, no new
+    // role string — this only ever widens `allow read`, never a write rule.
+    function callerPhone() {
+      return signedIn() ? request.auth.token.phone_number : null;
+    }
+
+    function isGuardianOfStudent(studentData) {
+      return signedIn() && studentData.status == 'active' && (
+        (callerPhone() != null && studentData.guardianPhone == callerPhone()) ||
+        (hasEmailClaim() && studentData.guardianEmail == request.auth.token.email)
+      );
+    }
+
+    // One-hop lookup for collections carrying a single studentId field
+    // (attendance, certificates, invoices, payments) rather than the
+    // student record itself — exists() first, same reasoning as
+    // isProvisionedActiveUser() above.
+    function isGuardianOfStudentId(studentId) {
+      return studentId != null
+        && exists(/databases/$(database)/documents/students/$(studentId))
+        && isGuardianOfStudent(get(/databases/$(database)/documents/students/$(studentId)).data);
+    }
+
     match /users/{userId} {
       // A person may always read their own record (to resolve their own
       // role/status on sign-in); an Administrator may read anyone's.
@@ -182,8 +228,9 @@ service cloud.firestore {
     // Milestone 3 (see ADR-014, docs/migrations/STUDENT_MODULE_MIGRATION.md).
     match /students/{studentId} {
       // Every role has student.view — Administrator, Owner & Accountant,
-      // Teacher & Reception, Viewer alike.
-      allow read: if isProvisionedActiveUser();
+      // Teacher & Reception, Viewer alike. A guardian may additionally read
+      // only their own child's record (Milestone P1).
+      allow read: if isProvisionedActiveUser() || isGuardianOfStudent(resource.data);
 
       allow create: if canManageStudents();
 
@@ -235,7 +282,9 @@ service cloud.firestore {
     // Service layer (attendance.service.js's postRegister()), not
     // duplicated here as a field-value rule.
     match /attendance/{attendanceId} {
-      allow read: if canViewAttendance();
+      // A guardian may additionally read only their own child's own
+      // attendance rows (Milestone P1).
+      allow read: if canViewAttendance() || isGuardianOfStudentId(resource.data.studentId);
       allow create, update: if canMarkAttendance();
 
       // Hard delete (students.service.js's deleteStudent(), which removes
@@ -309,7 +358,9 @@ service cloud.firestore {
       // The Certificates page is gated client-side by program.view, itself
       // granted to every role — Administrator, Owner & Accountant, Teacher
       // & Reception, Viewer alike — so every provisioned user can read here.
-      allow read: if isProvisionedActiveUser();
+      // A guardian may additionally read only their own child's own
+      // certificates (Milestone P1).
+      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
       allow create, update: if canIssueCertificates();
       allow delete: if isAdministrator();
     }
@@ -422,14 +473,18 @@ service cloud.firestore {
     // (raise/pay/refund/waive/cancel) field-by-field, the same reasoning
     // already used for Admissions' status transitions.
     match /invoices/{invoiceId} {
-      allow read: if isProvisionedActiveUser();
+      // A guardian may additionally read only their own child's own
+      // invoices — view-only, never create/update (Milestone P1).
+      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
       allow create: if canCollectFees();
       allow update: if canCollectFees() || canRefundFees() || canWaiveFees();
       allow delete: if false;
     }
 
     match /payments/{paymentId} {
-      allow read: if isProvisionedActiveUser();
+      // A guardian may additionally read only their own child's own
+      // payments — view-only, never create/update (Milestone P1).
+      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
       allow create: if canCollectFees();
       // Only refundPayment() ever updates an existing payment record.
       allow update: if canRefundFees();

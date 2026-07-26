@@ -87,6 +87,7 @@ export const bus = new EventBus();
 export const EVENTS = Object.freeze({
     APP_READY:          'app:ready',
     BRANCH_CHANGED:     'app:branch-changed',
+    PORTAL_CHILD_CHANGED: 'app:portal-child-changed',
     THEME_CHANGED:      'app:theme-changed',
     PREFS_CHANGED:      'app:prefs-changed',
 

@@ -218,14 +218,20 @@ independently-written ones that could drift.
 
 ## 6. Roadmap
 
-- **Parent/Student Portal authentication** — the primary reason Mobile
-  OTP was built to support phone-only identities as well as the
-  email-keyed accounts staff use today. This milestone's Mobile OTP
-  implementation resolves a phone number against an *existing*,
-  email-keyed `users` document (`findByMobile()`); a genuinely
-  phone-only identity with no email at all — what a Parent or Student
-  portal needs — is a larger data-model question for that portal's own
-  milestone, not solved here.
+- ~~**Parent/Student Portal authentication**~~ — **built, Milestone P1**
+  (v2.17.0). A guardian is not a `users` document at all — no role, no
+  Administrator provisioning step — just an authenticated Firebase user
+  (Mobile OTP, Google, or Email/Password) whose phone/email token claim
+  matches a `guardianPhone`/`guardianEmail` already on file for one or
+  more active students. Resolved by
+  `js/services/portal/guardianAuth.service.js`'s `resolveGuardianIdentity()`,
+  tried only as a fallback in `app.js` after the staff
+  `resolveProvisionedUser()` path rejects an identity as genuinely
+  unrecognised (`err.code === 'not_provisioned'`) — an
+  archived/inactive/method-not-permitted staff account is never
+  reinterpreted as "maybe a guardian." Enforced server-side by
+  `firestore.rules`' `isGuardianOfStudent()`/`isGuardianOfStudentId()`.
+  See `docs/migrations/PARENT_STUDENT_PORTAL_MILESTONE.md`.
 - **Displaying `authMethods`/sign-in history in the Users table** —
   cosmetic, not yet added; today it's only visible/editable inside the
   Add/Edit User form.
@@ -245,4 +251,4 @@ independently-written ones that could drift.
 | Does a mobile number need a country code typed in? | No — defaults to +91 automatically, on both the login screen and in Settings → Users (§5a). |
 | Can an existing Google-only account add a password? | Yes — self-service, via Settings → Users → **Set a password** on your own row (§5). Not something an Administrator can do to someone else's account. |
 | Does adding a provider require a redesign? | No — by construction, and verified in §4 above for all three. |
-| What's planned but not built? | True phone-only (no-email) identities for a future Parent/Student portal. |
+| What's planned but not built? | Nothing outstanding from this list — the Parent/Student Portal (true phone-only identities) shipped in Milestone P1. |

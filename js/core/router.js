@@ -24,8 +24,27 @@ import { icon } from '../ui/icons.js';
 import { expireSession } from '../services/auth.service.js';
 import { users$ } from '../data/repositories.js';
 
+/**
+ * The staff router's own live-status re-check — re-reads the caller's
+ * `users` doc on every navigation so a deactivation/archive elsewhere ends
+ * an open session immediately (see resolve()'s own comment). Extracted so a
+ * second Router instance (Milestone P1's Parent/Student Portal) can supply
+ * its own revalidation instead — a guardian has no `users` doc at all, so
+ * this exact check would fail every navigation for that session type.
+ */
+async function defaultRevalidate() {
+    const current = await users$.find(session.user.id).catch(() => null);
+    return Boolean(current && current.status === 'active');
+}
+
 class Router {
-    constructor() {
+    /**
+     * @param {object} [options]
+     * @param {Function} [options.revalidate]  async () => boolean, re-checked
+     *   on every navigation. Defaults to the staff users-doc live-status
+     *   check so the existing `router` singleton below is unchanged.
+     */
+    constructor({ revalidate = defaultRevalidate } = {}) {
         this.routes = [];
         this.viewport = null;
         this.current = null;
@@ -34,6 +53,7 @@ class Router {
         this.scrollPositions = new Map();
         this.returningToList = false;
         this.notFound = null;
+        this.revalidate = revalidate;
     }
 
     /**
@@ -107,9 +127,11 @@ class Router {
         // wants that to end their session, not just block their next
         // sign-in (already true via auth.service.js's provisioning check).
         // Re-checking the live Firestore record on every navigation is how
-        // a same-browser session actually notices.
-        const current = await users$.find(session.user.id).catch(() => null);
-        if (!current || current.status !== 'active') {
+        // a same-browser session actually notices. Pluggable per Router
+        // instance (see defaultRevalidate() above) — a guardian session
+        // supplies its own check instead of this staff-specific one.
+        const stillValid = await this.revalidate().catch(() => false);
+        if (!stillValid) {
             await expireSession();
             location.reload();
             return;
@@ -358,6 +380,12 @@ function compile(pattern) {
 }
 
 export const router = new Router();
+
+// Exported so the Parent/Student Portal (Milestone P1) can create its own
+// second Router instance with a guardian-appropriate `revalidate` — the
+// staff `router` singleton above is unaffected, since its own constructor
+// call still gets defaultRevalidate() implicitly.
+export { Router };
 
 /**
  * Base class for pages. Provides a disposal scope so a page can subscribe to
