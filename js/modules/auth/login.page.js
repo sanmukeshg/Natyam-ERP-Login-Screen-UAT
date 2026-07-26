@@ -274,6 +274,7 @@ export function renderLogin(container, { initialError = null } = {}) {
             otpVerify.hidden = false;
             container.querySelector('#f-otp-code').focus();
         } catch (err) {
+            console.error('[mobile-otp] sendCode failed', err?.code, err?.message, err);
             render(banner, errorBanner(friendlyAuthError(err, 'Could not send a code. Check the number and try again.')));
         } finally {
             sendOtpButton.removeAttribute('data-loading');
@@ -291,6 +292,7 @@ export function renderLogin(container, { initialError = null } = {}) {
             await confirmMobileCode(confirmation, code);
             // Left loading: same app.js hand-off as every other method.
         } catch (err) {
+            console.error('[mobile-otp] confirmCode failed', err?.code, err?.message, err);
             render(banner, errorBanner(friendlyAuthError(err, 'That code did not match. Check it and try again.')));
             verifyOtpButton.removeAttribute('data-loading');
             verifyOtpButton.disabled = false;
