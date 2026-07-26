@@ -2,7 +2,7 @@
 
 **Status:** Living reference (updated as providers are added; unlike an ADR,
 this document is expected to change as the roadmap below is delivered)
-**Last updated:** 2026-07-26 (Phase 1 / Milestone A1 — Unified Authentication Platform)
+**Last updated:** 2026-07-26 (v2.16.1 — self-service account linking + India phone default, follow-up to Milestone A1)
 **Related:** [ADR-014](adr/ADR-014-Firebase-Authentication-and-Firestore.md) (the decision that introduced this architecture), [firestore-data-model.md](firestore-data-model.md), [AUTHENTICATION_ARCHITECTURE_AUDIT.md](../audits/AUTHENTICATION_ARCHITECTURE_AUDIT.md)
 
 This document exists to answer one question precisely: **which sign-in
@@ -183,18 +183,41 @@ password. `settings.service.js`'s `createUser()` calls this *before*
 writing the Firestore document, so a failed Auth creation never leaves an
 orphaned authorization record with no way to actually sign in.
 
-Existing Google-only accounts are untouched by this milestone — no
-migration, no forced re-authentication, no linking. Account linking
-(letting one person sign in via either Google or Password into the same
-`users` record) is explicitly out of scope here; see §6.
+Existing Google-only accounts are untouched by provisioning — no
+migration, no forced re-authentication. **Account linking is implemented**
+(v2.16.1, added as a direct follow-up once real-world use surfaced the
+need): `passwordProvider.js`'s `linkPassword()` calls Firebase's
+`linkWithCredential()` against `auth.currentUser`, self-service only —
+`auth.service.js`'s `setOwnPassword(password)` is reachable from Settings
+→ Users → **Set a password**, visible only on the signed-in person's own
+row. This is deliberately *not* something an Administrator can trigger on
+someone else's account: `createUserWithEmailAndPassword` (the
+provisioning flow above) fails with `auth/email-already-in-use` for an
+email that already has a Firebase Auth identity from another provider —
+`linkWithCredential` is the only correct way to attach a second method to
+an *existing* identity, and it only works while signed in as that
+identity. After linking, `setOwnPassword()` also adds `'password'` to
+that account's own `authMethods` so the new credential is actually
+permitted, not just created.
+
+## 5a. Mobile Numbers Default to +91
+
+Firebase's `signInWithPhoneNumber` requires full E.164 (a leading `+` and
+country code). Since NATYAM's users are all Indian today, nobody should
+have to type `+91` on every sign-in. `login.page.js`'s `toIndianE164()`
+prepends `+91` to whatever's typed in the Mobile Number field unless it
+already starts with `+` (someone deliberately using a different country
+code). The same default is applied on the *storage* side —
+`users.repository.firestore.js`'s `normalisePhone()` — so a number an
+Administrator types into Settings → Users without a `+91` prefix
+normalises to the exact same canonical form Firebase hands back at
+sign-in time. Getting these two out of sync would silently break Mobile
+OTP for that account (a stored bare `9618007074` would never match a
+verified `+919618007074`), so both call the same rule rather than two
+independently-written ones that could drift.
 
 ## 6. Roadmap
 
-- **Account linking (Google ↔ Email/Password)** — letting an existing
-  Google-only user add a password to their own account via
-  `linkWithCredential()`, rather than the two ever risking two separate
-  Firebase identities for one person. Explicitly deferred from this
-  milestone.
 - **Parent/Student Portal authentication** — the primary reason Mobile
   OTP was built to support phone-only identities as well as the
   email-keyed accounts staff use today. This milestone's Mobile OTP
@@ -219,5 +242,7 @@ migration, no forced re-authentication, no linking. Account linking
 | What happened to `loginType`? | Deprecated (§2a) — retained on the document for shape/backward-compatibility only, read by no logic. |
 | How do pre-existing accounts get an `authMethods` array? | A one-time migration (§2a), not a runtime guess — `js/migrations/authMethodsMigration.js`. |
 | Can a mobile number be reused across accounts? | No — enforced unique on create and update (§2b), since Mobile OTP resolves an identity by phone number alone. |
+| Does a mobile number need a country code typed in? | No — defaults to +91 automatically, on both the login screen and in Settings → Users (§5a). |
+| Can an existing Google-only account add a password? | Yes — self-service, via Settings → Users → **Set a password** on your own row (§5). Not something an Administrator can do to someone else's account. |
 | Does adding a provider require a redesign? | No — by construction, and verified in §4 above for all three. |
-| What's planned but not built? | Account linking, and true phone-only (no-email) identities for a future Parent/Student portal. |
+| What's planned but not built? | True phone-only (no-email) identities for a future Parent/Student portal. |

@@ -9,6 +9,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.16.1] — 2026-07-26 — Self-Service Account Linking + India Phone Default
+
+Direct follow-up to v2.16.0, prompted by real usage during rollout: the existing (Google-only) Administrator account had no way to add Email & Password, and typing `+91` on every Mobile OTP sign-in was unnecessary friction for an all-Indian user base.
+
+### Added
+- **Self-service account linking** — `passwordProvider.js`'s `linkPassword()` (Firebase `linkWithCredential()` against `auth.currentUser`) and `auth.service.js`'s `setOwnPassword()`, reachable from Settings → Users → **Set a password**, visible only on the signed-in person's own row. Lets an existing Google-only account add Email & Password without creating a second, disconnected identity.
+- **India phone default** — `login.page.js`'s `toIndianE164()` prepends `+91` to a Mobile Number field entry that doesn't already start with `+`, so nobody has to type a country code to sign in.
+
+### Fixed
+- **A real consistency bug caught before it could cause a silent failure**: `users.repository.firestore.js`'s `normalisePhone()` didn't apply the same `+91` default as the login screen — a mobile number entered in Settings → Users as bare digits (e.g. `9618007074`) would never match the fully-qualified `+91...` number Firebase always returns for a verified sign-in, silently breaking Mobile OTP for that account. Both now share the identical normalisation rule.
+
+### Why this wasn't in v2.16.0
+Account linking was explicitly scoped out of the original milestone (see `AUTHENTICATION_PROVIDERS.md`'s original §5/§6) — `createUserWithEmailAndPassword()`, the mechanism the admin-provisioning flow uses for brand-new accounts, fails with `auth/email-already-in-use` for an email that already has a Firebase identity from another provider. Confirmed live during rollout when the existing Administrator account tried Email/Password and was correctly, safely rejected. `linkWithCredential()` is the actual correct mechanism for an *existing* identity, and it can only run self-service — never admin-on-behalf-of-another — which is why it's shaped the way it is.
+
+---
+
 ## [2.16.0] — 2026-07-26 — Unified Authentication Platform (Email/Password + Google + Mobile OTP)
 
 Phase 1 / Milestone A1. Three authentication providers now share the login screen — Google Sign-In (unchanged), Email & Password, and Mobile OTP — with per-account, Administrator-configurable permissions deciding which methods a given user may actually sign in with. IAM, roles, session management, and the Firestore data model are unchanged; this is additive.

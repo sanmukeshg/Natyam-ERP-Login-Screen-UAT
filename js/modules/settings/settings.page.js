@@ -50,6 +50,7 @@ import {
 } from '../../services/curriculum.service.js';
 import { search as searchAudit, describe as describeAudit, filterOptions, activitySummary } from '../../services/audit.service.js';
 import { authMethodsOf } from '../../data/repositories.js';
+import { setOwnPassword } from '../../services/auth.service.js';
 import { backupStatus, downloadBackup, inspectBackup, restore, exportStore, resetEverything } from '../../services/backup.service.js';
 import { IMPORTERS, readFile, dryRun, commit } from '../../services/import.service.js';
 
@@ -175,6 +176,7 @@ export default class SettingsPage extends Page {
             'new-user': () => this.editUser(null),
             'edit-user': () => this.editUser(dataset.id),
             'deactivate-user': () => this.deactivateUserFlow(dataset.id),
+            'set-own-password': () => this.setPasswordFlow(),
             'run-audit': () => this.paint(),
             'export-audit': () => this.exportAudit(),
             backup: () => this.takeBackup(),
@@ -937,6 +939,10 @@ export default class SettingsPage extends Page {
                                             <div class="row row-tight">
                                                 <button class="btn btn-sm btn-ghost"
                                                         data-do="edit-user" data-id="${user.id}">Edit</button>
+                                                ${user.id === session.actorId() ? html`
+                                                    <button class="btn btn-sm btn-ghost"
+                                                            data-do="set-own-password">Set a password</button>
+                                                ` : ''}
                                                 ${user.status === 'active' && user.id !== session.actorId() ? html`
                                                     <button class="btn btn-sm btn-danger-quiet"
                                                             data-do="deactivate-user" data-id="${user.id}">Remove</button>
@@ -963,8 +969,8 @@ export default class SettingsPage extends Page {
                 { name: 'name', label: 'Name', required: true, width: 'half', value: user?.name },
                 { name: 'email', label: 'Email', type: 'email', width: 'half', value: user?.email },
                 { name: 'mobile', label: 'Mobile number', type: 'tel', width: 'half', value: user?.mobile,
-                  placeholder: '+91 XXXXX XXXXX',
-                  hint: 'Required if Mobile OTP is checked below. Must be unique — no two accounts can share a number.' },
+                  placeholder: '98765 43210',
+                  hint: 'No need to type +91 — assumed automatically. Required if Mobile OTP is checked below. Must be unique — no two accounts can share a number.' },
                 {
                     name: 'role', label: 'Role', type: 'select', required: true, width: 'half',
                     value: user?.role || 'teacher_reception',
@@ -1000,6 +1006,33 @@ export default class SettingsPage extends Page {
 
         if (saved) {
             toast.success(user ? 'User updated.' : 'User added.');
+            await this.paint();
+        }
+    }
+
+    /**
+     * Self-service only — adds Email & Password as a sign-in method for the
+     * *current* account. Deliberately separate from editUser()'s generic
+     * form: this always targets whoever is signed in right now (see
+     * setOwnPassword()'s own doc comment for why an Administrator cannot
+     * do this on someone else's behalf), so there is no user picker here.
+     */
+    async setPasswordFlow() {
+        const saved = await formOverlay({
+            title: 'Set a password',
+            intro: 'This adds Email & Password as a sign-in method for your own account, alongside whatever you already use.',
+            fields: [
+                { name: 'password', label: 'New password', type: 'password', required: true },
+                { name: 'confirm', label: 'Confirm password', type: 'password', required: true }
+            ],
+            onSubmit: async (values) => {
+                if (values.password !== values.confirm) throw new Error('Passwords do not match.');
+                await setOwnPassword(values.password);
+            }
+        });
+
+        if (saved) {
+            toast.success('Password set. Email & Password is now enabled for your account.');
             await this.paint();
         }
     }

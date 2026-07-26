@@ -16,7 +16,8 @@ import { firebaseConfig } from '../../../config/firebase.config.js';
 import { initializeApp, deleteApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
 import {
     getAuth, signInWithEmailAndPassword, signOut,
-    sendPasswordResetEmail, createUserWithEmailAndPassword
+    sendPasswordResetEmail, createUserWithEmailAndPassword,
+    EmailAuthProvider, linkWithCredential
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
 
 export const passwordProvider = {
@@ -73,5 +74,25 @@ export const passwordProvider = {
         } finally {
             await deleteApp(provisioningApp);
         }
+    },
+
+    /**
+     * Self-service only — adds an Email/Password credential to whichever
+     * Firebase account is CURRENTLY signed in, via linkWithCredential().
+     * This is the only correct way to add a password to an account that
+     * already exists under another provider (e.g. Google):
+     * createUserWithEmailAndPassword() for an email that already has a
+     * Firebase Auth account fails with auth/email-already-in-use, since
+     * that function always creates a brand-new, separate identity — it
+     * cannot attach a second sign-in method to an existing one. An
+     * Administrator cannot do this on someone else's behalf; it can only
+     * run while signed in as the account being changed, which is why this
+     * takes no email argument — it always targets `auth.currentUser`.
+     */
+    async linkPassword(password) {
+        const current = auth.currentUser;
+        if (!current || !current.email) throw new Error('You must be signed in to set a password.');
+        const credential = EmailAuthProvider.credential(current.email, password);
+        await linkWithCredential(current, credential);
     }
 };

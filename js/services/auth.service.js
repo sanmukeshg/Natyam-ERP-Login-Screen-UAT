@@ -171,6 +171,26 @@ export async function provisionEmailPasswordUser({ email, password }) {
 }
 
 /**
+ * Self-service — lets the currently signed-in person add Email & Password
+ * as a sign-in method for their OWN account, via passwordProvider's
+ * linkPassword() (Firebase's linkWithCredential(), not the admin-creation
+ * flow above — that one fails for an email that already has an account,
+ * which every existing Google user's does). Not usable by an
+ * Administrator on someone else's behalf; there is no `email`/`userId`
+ * parameter here on purpose, since it can only ever target whoever is
+ * actually signed in right now. Updates that person's own `authMethods`
+ * afterward so the new credential is actually permitted, not merely
+ * created but rejected by the next sign-in attempt.
+ */
+export async function setOwnPassword(password) {
+    await passwordProvider.linkPassword(password);
+    const own = await users$.find(session.actorId());
+    const methods = new Set(authMethodsOf(own));
+    methods.add('password');
+    await users$.update(own.id, { authMethods: [...methods] });
+}
+
+/**
  * Decides whether a verified identity is actually let into NATYAM. Called
  * both by signIn() (a fresh sign-in) and by app.js's onAuthStateChanged
  * (restoring an existing Firebase session on reload) — the same decision

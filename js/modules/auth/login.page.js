@@ -55,6 +55,21 @@ function successBanner(message) {
 }
 
 /**
+ * NATYAM's users are all Indian today, and Firebase's `signInWithPhoneNumber`
+ * requires full E.164 (a leading `+` and country code) — asking every person
+ * to type `+91` themselves on every sign-in is friction with only one
+ * possible answer. A number that already has a `+` (someone deliberately
+ * entering a different country code) is left exactly as typed; anything
+ * else gets `+91` prepended, after stripping spaces/dashes and a leading
+ * trunk `0` some people habitually type before a 10-digit mobile number.
+ */
+function toIndianE164(raw) {
+    const digits = String(raw || '').replace(/[^\d+]/g, '');
+    if (digits.startsWith('+')) return digits;
+    return `+91${digits.replace(/^0+/, '')}`;
+}
+
+/**
  * Turns a thrown sign-in error into something safe to show. An error with
  * no `.code` is already one of our own — resolveProvisionedUser()'s
  * rejections are documented as safe to display verbatim. An error *with*
@@ -151,7 +166,7 @@ export function renderLogin(container, { initialError = null } = {}) {
                     <div data-role="otp-request">
                         <div class="field">
                             <label class="field-label" for="f-mobile">Mobile Number</label>
-                            <input class="input" type="tel" id="f-mobile" placeholder="+91 XXXXX XXXXX">
+                            <input class="input" type="tel" id="f-mobile" placeholder="98765 43210" autocomplete="tel">
                         </div>
                         <button class="btn btn-secondary btn-block" type="button" data-role="send-otp-btn">
                             Send OTP
@@ -249,7 +264,7 @@ export function renderLogin(container, { initialError = null } = {}) {
 
     on(container, 'click', '[data-role="send-otp-btn"]', async () => {
         render(banner, '');
-        const phoneNumber = container.querySelector('#f-mobile').value.trim();
+        const phoneNumber = toIndianE164(container.querySelector('#f-mobile').value.trim());
         sendOtpButton.setAttribute('data-loading', 'true');
         sendOtpButton.disabled = true;
 

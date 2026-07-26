@@ -1,9 +1,9 @@
-# Release Notes — NATYAM ERP v2.16.0
+# Release Notes — NATYAM ERP v2.16.1
 
-**Release:** Phase 1 / Milestone A1 — Unified Authentication Platform (Email/Password + Google + Mobile OTP)
+**Release:** Phase 1 / Milestone A1 — Unified Authentication Platform (Email/Password + Google + Mobile OTP), plus a same-day follow-up (v2.16.1) adding self-service account linking and an India phone default
 **Date:** 26 July 2026
 **Baseline:** v2.15.0
-**Type:** New authentication providers plus one new, Administrator-configurable permission layer (`authMethods`, the single source of truth — the older `loginType` field is now deprecated), a mobile-number-uniqueness rule, and a one-time migration for existing accounts. No change to IAM, roles, session management, or the Firestore data model beyond these additive fields.
+**Type:** New authentication providers plus one new, Administrator-configurable permission layer (`authMethods`, the single source of truth — the older `loginType` field is now deprecated), a mobile-number-uniqueness rule, a one-time migration for existing accounts, self-service account linking, and a default country code for mobile numbers. No change to IAM, roles, session management, or the Firestore data model beyond these additive fields.
 
 ---
 
@@ -32,6 +32,14 @@ A "Forgot password?" link on the login screen sends a reset email through Fireba
 - **Mobile numbers are unique.** The same mobile number can't be assigned to two active accounts, since Mobile OTP looks a person up by their number alone.
 - If someone tries to sign in with a method their account isn't permitted to use, they see a clear, plain-English message telling them so — never a raw technical error.
 
+### Already using Google? You can now add a password to that same account
+
+If your account only ever signed in with Google, you can now add Email & Password to it yourself — no need to create a second account. Go to **Settings → Users**, find your own row, and click **Set a password**. This only works on your *own* account, signed in as yourself — an Administrator cannot set a password for someone else's existing account this way (that's a deliberate Firebase security boundary, not a missing feature — see the Administrator note below for how to add Email & Password when creating a brand-new user instead).
+
+### No more typing +91
+
+The Mobile Number field, both at sign-in and in Settings → Users, now assumes an Indian number if you don't type a country code. Enter your 10-digit number as-is — `+91` is added automatically.
+
 ---
 
 ## For administrators / IT
@@ -42,6 +50,7 @@ A "Forgot password?" link on the login screen sends a reset email through Fireba
 - **Existing Google accounts are completely unaffected** by the release itself. No forced re-authentication, nothing to do for anyone already using Google — once the migration step above has run.
 - **A field called `loginType` on user records is now retired.** Nothing reads it anymore; it's left in place purely so nothing breaks that still expects it to exist. No action needed.
 - **Mobile OTP sign-in and SMS delivery could not be tested end-to-end in the development environment** — no real phone, no live SMS. It has been built and statically verified, but needs one real pass, on a real device, before you rely on it.
+- **If you already saved a mobile number in Settings before this update**, re-open that user's Edit panel and re-save the mobile number field once — this normalises it to the `+91...` form Mobile OTP actually matches against. Numbers saved before v2.16.1 may have been stored without the country code, which would silently fail to match at sign-in.
 
 ## Quality
 
@@ -69,10 +78,14 @@ A "Forgot password?" link on the login screen sends a reset email through Fireba
 - [ ] Attempt a sign-in with a wrong password / bad OTP code and confirm the message shown is plain language, not a raw `Firebase: Error (auth/...)` string.
 - [ ] Confirm session persistence across a page reload for all three methods, and that logout works for all three.
 - [ ] Confirm route guards still redirect an unauthenticated visit to the login screen.
+- [ ] As a signed-in Google-only user, go to Settings → Users → your own row → **Set a password**; confirm it succeeds and that Email & Password now works to sign in as that same account.
+- [ ] Confirm the **Set a password** button does *not* appear on any row except your own.
+- [ ] On the login screen, type a bare 10-digit mobile number (no `+91`) into Mobile Number and confirm **Send OTP** works without needing a country code.
+- [ ] In Settings → Users, save a mobile number without a `+91` prefix, then confirm Mobile OTP sign-in with that number succeeds (proves the storage-side and sign-in-side normalisation match).
 
 ## Known issues
 
-None introduced by this release. Account linking (letting one existing Google user also add a password to the same account) is explicitly not part of this release — see `docs/architecture/AUTHENTICATION_PROVIDERS.md` §6 for the roadmap. See v2.4.0's through v2.15.0's release notes for trade-offs carried forward from earlier work.
+None introduced by this release. See v2.4.0's through v2.15.0's release notes for trade-offs carried forward from earlier work.
 
 ## Upgrade
 

@@ -39,11 +39,24 @@ function emailId(email) {
     return String(email || '').trim().toLowerCase();
 }
 
-/** Collapses whitespace and keeps only digits and a leading +. Same rule students/staff repositories use. */
+/**
+ * Collapses whitespace and keeps only digits and a leading +, same as
+ * students/staff repositories — but this one additionally defaults to
+ * India's +91 when no country code is given, since NATYAM's users are all
+ * Indian and Mobile OTP sign-in resolves an identity by this field alone
+ * (findByMobile()). Firebase always hands back a fully-qualified E.164
+ * number (e.g. +919618007074) for a verified sign-in; a stored value of
+ * bare digits would never match it, silently breaking Mobile OTP for that
+ * account. This mirrors login.page.js's own toIndianE164() exactly, so a
+ * number typed in Settings and a number typed at sign-in normalise to the
+ * same canonical form.
+ */
 function normalisePhone(value) {
     if (!value) return null;
-    const cleaned = String(value).replace(/[^\d+]/g, '');
-    return cleaned || null;
+    const digits = String(value).replace(/[^\d+]/g, '');
+    if (!digits) return null;
+    if (digits.startsWith('+')) return digits;
+    return `+91${digits.replace(/^0+/, '')}`;
 }
 
 /**
