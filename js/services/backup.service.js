@@ -251,7 +251,13 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         ...indexedDbStores
     } = known;
 
-    await db.importAll(indexedDbStores, { mode: 'replace' });
+    // A backup made up entirely of already-Firestore-migrated sections (every
+    // key above gets destructured out by name) legitimately leaves nothing
+    // for IndexedDB to import — importAll() throws on an empty store map,
+    // which must not abort the Firestore restores below.
+    if (Object.keys(indexedDbStores).length) {
+        await db.importAll(indexedDbStores, { mode: 'replace' });
+    }
     if (studentRows) await students$.replaceAll(studentRows);
     if (admissionRows) await admissions$.replaceAll(admissionRows);
     if (attendanceRows) await attendance$.replaceAll(attendanceRows);
