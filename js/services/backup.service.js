@@ -22,7 +22,8 @@ import {
     settings$, students$, admissions$, attendance$, classSessions$, programs$, certificates$, batches$, staff$,
     feePlans$, invoices$, payments$, ledger$, expenses$, salaries$,
     documents$, drafts$, notifications$,
-    branches$, academicYears$, curricula$, curriculumLevels$, holidays$
+    branches$, academicYears$, curricula$, curriculumLevels$, holidays$,
+    audit$
 } from '../data/repositories.js';
 
 const FILE_KIND = 'natyam-erp-backup';
@@ -63,13 +64,13 @@ export async function buildBackup({ note = null } = {}) {
     // (Milestone 6), Class Sessions (Milestone 7), Programmes (Milestone 17),
     // Certificates (Milestone 18), Batches (Milestone 19), Staff
     // (Milestone 20), Fee Collection + Finance (Milestone 21),
-    // Documents + Admission Drafts + Notifications (Milestone 22) and
-    // Settings reference data (Milestone 23) moved to Cloud Firestore —
-    // db.exportAll() only sees IndexedDB, which no longer holds the real
-    // records for any of these. Overwrite those sections with live
-    // Firestore data so a backup taken today actually reflects today's
-    // records, not a stale or empty local copy. The audit log is the one
-    // remaining section still on IndexedDB.
+    // Documents + Admission Drafts + Notifications (Milestone 22),
+    // Settings reference data (Milestone 23) and the Audit Log
+    // (Milestone 24, the last store off IndexedDB) all moved to Cloud
+    // Firestore — db.exportAll() only sees IndexedDB, which no longer
+    // holds the real records for any of these. Overwrite those sections
+    // with live Firestore data so a backup taken today actually reflects
+    // today's records, not a stale or empty local copy.
     data.students = await students$.all({ includeDeleted: true });
     data.admissions = await admissions$.all({ includeDeleted: true });
     data.attendance = await attendance$.all();
@@ -92,6 +93,7 @@ export async function buildBackup({ note = null } = {}) {
     data.curricula = await curricula$.all({ includeDeleted: true });
     data.curriculumLevels = await curriculumLevels$.all({ includeDeleted: true });
     data.holidays = await holidays$.all({ includeDeleted: true });
+    data.auditLog = await audit$.all();
 
     const counts = Object.fromEntries(Object.entries(data).map(([store, rows]) => [store, rows.length]));
 
@@ -231,11 +233,11 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     // Certificates, Batches, Staff, Fee Plans, Invoices, Payments, Ledger
     // Entries, Expenses, Salaries, Documents, Admission Drafts,
     // Notifications, Branches, Academic Years, Curricula, Curriculum
-    // Levels and Holidays moved to Cloud Firestore — restored separately
-    // from every other store. Left inside `known`, db.importAll() would
-    // either silently write these sections to their now-orphaned local
-    // IndexedDB stores, or (for classSessions, which never had one) throw
-    // trying to write to a store that doesn't exist.
+    // Levels, Holidays and the Audit Log moved to Cloud Firestore —
+    // restored separately from every other store. Left inside `known`,
+    // db.importAll() would either silently write these sections to their
+    // now-orphaned local IndexedDB stores, or (for classSessions, which
+    // never had one) throw trying to write to a store that doesn't exist.
     const {
         students: studentRows, admissions: admissionRows, attendance: attendanceRows,
         classSessions: classSessionRows, programs: programRows, certificates: certificateRows,
@@ -245,6 +247,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         documents: documentRows, admissionDrafts: draftRows, notifications: notificationRows,
         branches: branchRows, academicYears: academicYearRows, curricula: curriculumRows,
         curriculumLevels: curriculumLevelRows, holidays: holidayRows,
+        auditLog: auditLogRows,
         ...indexedDbStores
     } = known;
 
@@ -271,6 +274,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     if (curriculumRows) await curricula$.replaceAll(curriculumRows);
     if (curriculumLevelRows) await curriculumLevels$.replaceAll(curriculumLevelRows);
     if (holidayRows) await holidays$.replaceAll(holidayRows);
+    if (auditLogRows) await audit$.replaceAll(auditLogRows);
 
     await settings$.set('lastRestoreAt', nowISO());
 

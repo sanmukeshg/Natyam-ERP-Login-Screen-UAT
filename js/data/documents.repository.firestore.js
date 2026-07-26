@@ -18,8 +18,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { firestore } from '../core/firebase.js';
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
-import { uid } from '../utils/id.js';
+import { recordAuditEntry } from './auditLog.repository.firestore.js';
 import { nowISO } from '../utils/date.js';
 
 const COLLECTION_NAME = 'documents';
@@ -39,16 +38,7 @@ function searchKeyOf(record) {
 }
 
 async function writeAuditRow(action, id, detail) {
-    await db.put('auditLog', {
-        id: uid('AUD'),
-        entity: 'Document',
-        entityId: id,
-        action,
-        detail: detail || null,
-        actorId: session.actorId(),
-        actorName: session.actorName(),
-        at: nowISO()
-    });
+    await recordAuditEntry('Document', action, id, detail);
 }
 
 class FirestoreDocumentRepository {

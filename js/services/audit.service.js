@@ -14,8 +14,7 @@
  */
 
 import { session } from '../core/session.js';
-import { uid } from '../utils/id.js';
-import { localDate, addDays, formatDateTime, relativeTime, nowISO } from '../utils/date.js';
+import { localDate, addDays, formatDateTime, relativeTime } from '../utils/date.js';
 import { formatMoney } from '../utils/money.js';
 import { audit$, users$ } from '../data/repositories.js';
 
@@ -46,28 +45,6 @@ const ACTION_VERBS = {
  * timeline and the CSV export without three slightly different phrasings
  * drifting apart.
  */
-/**
- * Builds an audit row for writing inside a caller's transaction.
- *
- * The fees and finance services each had a private copy. Both wrote the log's
- * shape by hand, which meant the format of the audit trail was defined in three
- * places and could drift silently — the one record where drift is least
- * acceptable, since it exists to be trusted after the fact.
- *
- * Returned rather than written, because the caller must put it inside the same
- * transaction as the change it describes. An audit entry committed separately
- * can survive a rolled-back write and describe something that never happened.
- */
-export function auditRow(entity, entityId, action, detail = null) {
-    return {
-        id: uid('AUD'),
-        entity, entityId, action, detail,
-        actorId: session.actorId(),
-        actorName: session.actorName(),
-        at: nowISO()
-    };
-}
-
 export function describe(entry) {
     const actor = entry.actorName || 'Someone';
     const verb = ACTION_VERBS[entry.action] || entry.action;

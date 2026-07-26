@@ -31,10 +31,7 @@
 
 import { StudentRepository } from '../data/archive/students.repository.indexeddb.js';
 import { students$ } from '../data/repositories.js';
-import { db } from '../core/db.js';
-import { session } from '../core/session.js';
-import { nowISO } from '../utils/date.js';
-import { uid } from '../utils/id.js';
+import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 
 const legacyRepo = new StudentRepository();
 
@@ -129,23 +126,14 @@ export async function migrateStudentsToFirestore({ overwrite = false, dryRun = f
     report.durationMs = Date.now() - startedAt;
 
     if (!dryRun) {
-        await db.put('auditLog', {
-            id: uid('AUD'),
-            entity: 'Student',
-            entityId: null,
-            action: 'migrateFromIndexedDB',
-            detail: {
-                totalIndexedDb: report.totalIndexedDb,
-                migrated: report.migrated,
-                overwritten: report.overwritten,
-                skippedDuplicates: report.skippedDuplicates,
-                validationFailures: report.validationFailures.length,
-                writeFailures: report.writeFailures.length,
-                durationMs: report.durationMs
-            },
-            actorId: session.actorId(),
-            actorName: session.actorName(),
-            at: nowISO()
+        await recordAuditEntry('Student', 'migrateFromIndexedDB', null, {
+            totalIndexedDb: report.totalIndexedDb,
+            migrated: report.migrated,
+            overwritten: report.overwritten,
+            skippedDuplicates: report.skippedDuplicates,
+            validationFailures: report.validationFailures.length,
+            writeFailures: report.writeFailures.length,
+            durationMs: report.durationMs
         });
     }
 

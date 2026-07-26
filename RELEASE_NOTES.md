@@ -1,111 +1,116 @@
-# Release Notes — NATYAM ERP v2.14.0
+# Release Notes — NATYAM ERP v2.15.0
 
-**Release:** Settings Reference Data Migration & Completion
-**Date:** 25 July 2026
-**Baseline:** v2.13.0
-**Type:** Data-layer migration for five modules, plus two correctness
-fixes and one boot-time reliability fix found during review. No redesign
-of branch, academic year, curriculum, level, or holiday management.
+**Release:** Audit Log Migration & Completion — the final Firestore migration
+**Date:** 26 July 2026
+**Baseline:** v2.14.0
+**Type:** Data-layer migration for the last remaining module, plus removal
+of one confirmed-dead helper function found during review. No redesign of
+what gets audited or how it's displayed.
 
 ---
 
 ## What changed for the academy
 
-### Branches, academic years, curriculum and holidays now live in the cloud
+### The audit trail now lives in the cloud
 
-Branches, academic years, the curriculum structure, curriculum levels,
-and holidays now live in Cloud Firestore instead of just this browser's
-local storage. Nothing about how you create or edit a branch, set the
-current academic year, or manage the curriculum has changed; only where
-the record is actually stored. This is the module every other screen in
-the app leans on — branch names, the branch switcher, and academic-year
-context appear almost everywhere — so this release closes out the last
-IndexedDB dependency across nearly the whole application.
+Every action the app records — who created a student, collected a fee,
+marked attendance, edited a batch — now writes its audit entry to Cloud
+Firestore instead of just this browser's local storage. Nothing about
+what you see on the Audit Log screen, how filtering works, or how an
+activity is described has changed; only where the record is actually
+stored.
 
-### Two duplicate-code protections that were quietly relying on this browser
+**This completes the migration.** As of this release, every module in
+NATYAM ERP — Students, Admissions, Attendance, Timetable, Programmes,
+Certificates, Batches, Staff, Fee Collection, Finance, Documents,
+Admission Drafts, Notifications, Branches, Academic Years, Curricula,
+Curriculum Levels, Holidays, and now the Audit Log — lives in Cloud
+Firestore. Nothing in the application's own data still depends on this
+browser's local storage.
 
-Two branches — or two curricula — could never share the same code before,
-but that protection lived only in this browser's local database, not in
-the application itself. It now checks explicitly and tells you clearly if
-a code is already in use, the same protection your team already relies on
-for Batches and Staff.
+### A few extra spots found and fixed along the way
 
-### A sign-in reliability improvement
-
-If your branch list ever failed to load for a moment — a slow connection,
-for instance — the app used to sign you back out and show a confusing
-"not able to sign in" message, even though your account was perfectly
-fine. It now shows the app with a clear note that branches couldn't load,
-rather than locking you out.
+While retargeting the audit trail, four places were found writing audit
+entries by a slightly different path than the rest of the app: enrolling
+an applicant, moving a group of students between batches, signing in, and
+the two one-time data-migration tools used earlier in this project. All
+four now write through the same route as everything else, so no audit
+entry is left behind on the old local storage after this release.
 
 ---
 
 ## For administrators / IT
 
 - **`firestore.rules` must be republished** — it now also covers
-  `branches`, `academicYears`, `curricula`, `curriculumLevels`, and
-  `holidays`. Firebase Console → Firestore Database → Rules → paste the
+  `auditLog`. Firebase Console → Firestore Database → Rules → paste the
   current file → Publish.
-- **No other module changed.** Students, Admissions, Attendance, Class
-  Sessions, Programmes, Certificates, Batches, Staff, Fee Collection,
-  Finance, Documents, Admission Drafts, Notifications, Reports, Dashboard
-  all continue exactly as before.
-- **No data migrated automatically.** These five Firestore collections
-  start empty unless already populated by an earlier restore — including
-  your branch list. **Publish the rules and restore your data before
-  relying on this release**, or the branch switcher and academic-year
-  context will be empty.
-- **Who can manage these settings is unchanged** — Administrator only,
-  exactly as before; the new Firestore rules enforce server-side what the
-  app already enforced in the interface. Every role can still read branch,
-  year, curriculum, and holiday data.
+- **Who can see the audit trail is unchanged** — Administrator only,
+  exactly as before; the new Firestore rule enforces server-side what the
+  app already enforced in the interface. Every signed-in, active person
+  can still *write* an audit entry as a side effect of their own normal
+  work (collecting a fee, marking attendance, and so on), the same as
+  today.
+- **No data migrated automatically.** The `auditLog` collection starts
+  empty unless already populated by an earlier restore. Existing audit
+  history on this browser's local storage is untouched and still
+  readable there if needed, but new activity from this release onward
+  writes to Firestore only.
+- **No other module changed.** Every previously migrated screen continues
+  exactly as before.
 
 ## Quality
 
 - Static analysis clean: no import cycles, all imports resolve, no
-  undefined identifiers (113 modules).
-- Every existing caller of these five repositories (the sign-in path,
-  Settings, the branch switcher, Reports, Dashboard, Batches, Programmes,
-  Finance, Admissions, Students) confirmed unchanged and loads cleanly.
-- All 22 repository files (including all five new ones) load and execute
-  in the browser with zero console errors, and the sign-in boot sequence
-  — which now includes the reliability fix — runs cleanly end to end.
+  undefined identifiers.
+- Every one of the 20 files with a private audit-row writer (19
+  repositories plus the sign-in service), plus the 4 additional call
+  sites found during review, confirmed retargeted with no remaining
+  direct writes to the old local audit store.
+- The Audit Log screen, its filters, the dashboard's recent-activity
+  feed, and the CSV export all confirmed to call the same repository
+  methods with the same signatures as before — no logic changes needed
+  on the reading side.
 
-**Not verifiable from this environment:** actually creating a branch,
-changing the current academic year, or editing the curriculum against
-Firestore requires being signed in with a real Google account in a real
-browser. The manual checklist below is what needs a real pass.
+**Not verifiable from this environment:** actually performing an action
+and watching its audit entry appear requires being signed in with a real
+Google account in a real browser. The manual checklist below is what
+needs a real pass.
 
 ## Manual UAT checklist
 
-- [ ] Publish the current `firestore.rules` (now including `branches`,
-      `academicYears`, `curricula`, `curriculumLevels`, `holidays`) before
-      testing anything else below.
-- [ ] Confirm the branch switcher in the top navigation still shows your
-      branches correctly, and sign-in still works normally.
-- [ ] Create a new branch, then attempt to create another with the same
-      code — confirm a clear "already exists" error.
-- [ ] Edit a branch's code to clash with another branch's — confirm the
-      same clear error (this path had no protection at all before).
-- [ ] Close a branch.
-- [ ] Add a new academic year, then set it as the current year — confirm
-      only one year shows as current afterward.
-- [ ] Add a curriculum, then attempt a duplicate code — confirm the error.
-      Edit an existing curriculum's structure.
-- [ ] Confirm the Dashboard's holiday banner (if any holidays are on
-      record) still displays correctly.
-- [ ] As a non-Administrator account, confirm you can see branches,
-      academic years, and curriculum but cannot create or edit any of
-      them.
+- [ ] Publish the current `firestore.rules` (now including `auditLog`)
+      before testing anything else below.
+- [ ] Edit a record in at least three different modules (e.g. a student,
+      a fee payment, an attendance register) and confirm each produces a
+      correctly worded, correctly attributed entry on the Audit Log
+      screen.
+- [ ] Confirm the Audit Log's entity/action/date-range filters still
+      work, and the CSV export still downloads correctly.
+- [ ] Confirm the Dashboard's recent-activity feed still populates.
+- [ ] Enrol an applicant from Admissions and confirm an "enrolled" audit
+      entry appears.
+- [ ] Move a group of students to another batch (bulk reassign) and
+      confirm a "reassigned" audit entry appears.
+- [ ] Sign in and sign out, and confirm both produce audit entries.
+- [ ] As a non-Administrator account, confirm the Audit Log screen is not
+      reachable (this was already true client-side; confirm it holds
+      server-side too).
+- [ ] Take a backup and confirm it includes an `auditLog` section;
+      restore it and confirm the entries come back with their original
+      ids and timestamps intact.
 
 ## Known issues
 
-None introduced by this release. See v2.4.0's through v2.13.0's release
+None introduced by this release. See v2.4.0's through v2.14.0's release
 notes for trade-offs carried forward from earlier migrations.
+`backup.service.js`'s `resetEverything()` still only clears IndexedDB
+stores, not their Firestore equivalents — a pre-existing gap across all
+24 collections, not something this release introduces or worsens.
 
 ## Upgrade
 
 Replace the application files, **and publish the updated
-`firestore.rules`** — this release does not work without it, and sign-in
-itself depends on it. No IndexedDB migration is required for any other
-module; only these five screens' data source changes.
+`firestore.rules`** — this release does not work without it. No
+IndexedDB migration is required for any other module; only the audit
+trail's data source changes. This is the last data-layer migration
+planned for this project.

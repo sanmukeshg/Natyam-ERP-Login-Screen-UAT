@@ -13,7 +13,6 @@
  * leave the books unbalanced if the second write failed.
  */
 
-import { Repository } from '../core/repository.js';
 import { db, request } from '../core/db.js';
 
 /* ==========================================================================
@@ -165,27 +164,11 @@ import { db, request } from '../core/db.js';
    from this same file, unchanged.
    ========================================================================== */
 
-class AuditRepository extends Repository {
-    constructor() {
-        super({ store: 'auditLog', prefix: 'AUD', entity: 'Audit entry', softDelete: false, audit: false });
-    }
-
-    async recent(limit = 50) {
-        return (await this.all())
-            .sort((a, b) => (b.at || '').localeCompare(a.at || ''))
-            .slice(0, limit);
-    }
-
-    async forEntity(entity, entityId) {
-        return (await this.where('entity', entity))
-            .filter((a) => !entityId || a.entityId === entityId)
-            .sort((a, b) => b.at.localeCompare(a.at));
-    }
-
-    async between(from, to) {
-        return (await this.all()).filter((a) => a.at >= from && a.at <= `${to}\uffff`);
-    }
-}
+// AuditRepository moved to Firestore (Milestone 24 - the final store off
+// IndexedDB). The old implementation is archived, not deleted, at
+// js/data/archive/auditLog.repository.indexeddb.js. `audit$` is re-exported
+// from the Firestore module below so audit.service.js keeps importing it
+// from this same file, unchanged.
 
 // UserRepository moved to Firestore — see users.repository.firestore.js.
 // `users$` is re-exported from there below so every existing caller
@@ -272,7 +255,7 @@ export { programs$ } from './programs.repository.firestore.js';
 export { certificates$ } from './certificates.repository.firestore.js';
 export { documents$ } from './documents.repository.firestore.js';
 export { notifications$ } from './notifications.repository.firestore.js';
-export const audit$         = new AuditRepository();
+export { audit$ } from './auditLog.repository.firestore.js';
 export { users$ } from './users.repository.firestore.js';
 export { curricula$ } from './curricula.repository.firestore.js';
 export { curriculumLevels$ } from './curriculumLevels.repository.firestore.js';

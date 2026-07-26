@@ -17,8 +17,8 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
-import { uid, sequenceNumber } from '../utils/id.js';
+import { sequenceNumber } from '../utils/id.js';
+import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 import { localDate, nowISO, academicYearOf, ageFrom, daysBetween, addDays } from '../utils/date.js';
 import { formatMoney } from '../utils/money.js';
 import { STUDENT_STATUS, LEVELS, INVOICE_STATUS, levelLabel } from '../config/app.config.js';
@@ -470,16 +470,12 @@ export async function bulkAssign(studentIds, batchId) {
     // rather than a raw db.unit() write — that write bypassed the Students
     // repository entirely and would have kept targeting IndexedDB's
     // `students` store after Milestone 3, orphaned from the Firestore
-    // collection `students$` actually points to. The audit row still goes
-    // to IndexedDB's auditLog, same as every other write in this file;
-    // Firestore and IndexedDB are different databases, so this can no
-    // longer be one atomic transaction spanning both the way it was before.
+    // collection `students$` actually points to. The audit row is a
+    // separate Firestore write, not part of that same batch — a failure
+    // writing it leaves the move applied without an audit entry rather
+    // than students half-moved.
     await students$.updateMany(updated);
-    await db.put('auditLog', {
-        id: uid('AUD'), entity: 'Student', entityId: null, action: 'bulkAssign',
-        detail: { batchId, count: updated.length },
-        actorId: actor, actorName: session.actorName(), at
-    });
+    await recordAuditEntry('Student', 'bulkAssign', null, { batchId, count: updated.length });
 
     for (const student of updated) bus.emit(EVENTS.STUDENT_UPDATED, { student });
     return updated.length;

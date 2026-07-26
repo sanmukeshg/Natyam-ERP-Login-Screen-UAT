@@ -9,6 +9,67 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.15.0] — 2026-07-26 — Audit Log Migration & Completion (final migration)
+
+The last entity off IndexedDB. All 24 entities in NATYAM ERP are now on
+Cloud Firestore. Structurally different from every prior migration: there
+was never one repository writing to this collection — 19 repository files
+each had their own private `writeAuditRow(action, id, detail)` wrapper
+writing `db.put('auditLog', ...)` directly, and four more direct write
+sites turned up during implementation (`admissions.service.js`'s
+`enrolApplicant()`, `students.service.js`'s `bulkAssign()`,
+`auth.service.js`'s own Auth-entity writer, and the two one-time
+IndexedDB→Firestore migration utilities). Every one of them now calls a
+single shared writer instead — the row shape and every call site's
+behaviour are unchanged, only where the row lands has moved.
+
+### Added
+- **`js/data/auditLog.repository.firestore.js`** — the `auditLog`
+  collection. Unlike every other (small, bounded) collection's
+  repository, `recent()` is a real Firestore `orderBy`+`limit` query
+  rather than "fetch everything, sort, slice" — this is the one
+  collection that grows on every write in the entire app, without bound.
+  Exports `recordAuditEntry(entity, action, entityId, detail, actor?)`,
+  the new single writer every other file's `writeAuditRow` calls into.
+- **`firestore.rules`**: `auditLog` — read gated to `isAdministrator()`
+  (matching `audit.view`, Administrator-only in `app.config.js`'s `ROLES`
+  table); create open to any `isProvisionedActiveUser()`, since an audit
+  row is a side effect of normal actions across every role, not just
+  Administrators — the same asymmetry already accepted for
+  `ledgerEntries` (Milestone 21). No update/delete path — append-only.
+
+### Changed
+- **20 files' private `writeAuditRow` wrappers** (the 19 repositories
+  plus `auth.service.js`) now call `recordAuditEntry()` instead of
+  `db.put('auditLog', ...)` directly — every call site unchanged, only
+  the function body. `auth.service.js`'s wrapper needed an optional
+  `actor` override (sign-in runs before a session exists to attribute a
+  row to via `session.actorId()`), so `recordAuditEntry()` grew a 5th,
+  optional parameter for it.
+- **Four additional repository-bypass sites, found during
+  implementation, not part of the original 19**: `admissions.service.js`'s
+  `enrolApplicant()`, `students.service.js`'s `bulkAssign()`, and the
+  one-time `admissionDataMigration.js`/`studentDataMigration.js`
+  utilities each had their own direct `db.put('auditLog', ...)` call.
+  All four now call `recordAuditEntry()` too.
+- `js/data/repositories.js` — the old IndexedDB `AuditRepository` class
+  removed; `audit$` re-exported from the new Firestore module, same name,
+  zero changes needed in `audit.service.js`. The now-fully-unused
+  `Repository` base-class import dropped from this file (nothing left in
+  it extends the IndexedDB base class — every archived snapshot still
+  does, for rollback fidelity, but nothing live).
+- `js/services/backup.service.js`'s `buildBackup()`/`restore()` extended
+  for `auditLog`, the same fix already made for every prior migration.
+
+### Removed
+- **`audit.service.js`'s `auditRow()`** — a confirmed-dead export (zero
+  real callers; its own doc comment described a design that stopped
+  applying once Fee Collection/Finance centralized their audit writes
+  into `ledger.repository.firestore.js`, Milestone 21). Removed rather
+  than left beside the new canonical writer it was superseded by.
+
+---
+
 ## [2.14.0] — 2026-07-25 — Settings Reference Data Migration & Completion
 
 Branches, Academic Years, Curricula, Curriculum Levels, and Holidays — the

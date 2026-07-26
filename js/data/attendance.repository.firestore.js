@@ -32,8 +32,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 import { firestore } from '../core/firebase.js';
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
-import { uid } from '../utils/id.js';
+import { recordAuditEntry } from './auditLog.repository.firestore.js';
 import { nowISO } from '../utils/date.js';
 import { ATTENDANCE_STATUS } from '../config/app.config.js';
 
@@ -41,16 +40,7 @@ const COLLECTION_NAME = 'attendance';
 const attendanceCollection = collection(firestore, COLLECTION_NAME);
 
 async function writeAuditRow(action, id, detail) {
-    await db.put('auditLog', {
-        id: uid('AUD'),
-        entity: 'Attendance',
-        entityId: id,
-        action,
-        detail: detail || null,
-        actorId: session.actorId(),
-        actorName: session.actorName(),
-        at: nowISO()
-    });
+    await recordAuditEntry('Attendance', action, id, detail);
 }
 
 class FirestoreAttendanceRepository {

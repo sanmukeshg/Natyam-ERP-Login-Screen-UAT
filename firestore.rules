@@ -2,7 +2,7 @@
 // (Auth, Users, Login Sessions, Students, Admissions, Attendance, Class
 // Sessions, Programmes, Certificates, Batches, Staff, Fee Collection,
 // Finance, Documents, Admission Drafts, Notifications, Branches,
-// Academic Years, Curricula, Curriculum Levels & Holidays)
+// Academic Years, Curricula, Curriculum Levels, Holidays & Audit Log)
 //
 // Two unrelated things are both called "sessions" below — `sessions` is a
 // sign-in record (js/data/sessions.repository.firestore.js); `classSessions`
@@ -29,10 +29,10 @@
 // `attendance`/`classSessions`/`programs`/`certificates`/`batches`/`staff`/
 // `feePlans`/`invoices`/`payments`/`ledgerEntries`/`expenses`/`salaries`/
 // `documents`/`admissionDrafts`/`notifications`/`branches`/`academicYears`/
-// `curricula`/`curriculumLevels`/`holidays` is denied by default: the
-// audit log is the only module still on IndexedDB in this phase with no
-// Firestore collection to protect yet. The final catch-all rule must stay
-// last, and must be revisited if that ever changes.
+// `curricula`/`curriculumLevels`/`holidays`/`auditLog` is denied by
+// default. As of Milestone 24 every entity in the app is on Firestore —
+// no store is left on IndexedDB with no rules to protect it. The final
+// catch-all rule must stay last regardless.
 
 rules_version = '2';
 service cloud.firestore {
@@ -555,6 +555,20 @@ service cloud.firestore {
     match /holidays/{holidayId} {
       allow read: if isProvisionedActiveUser();
       allow create, update, delete: if false;
+    }
+
+    // Milestone 24 (see ADR-014) — the final store off IndexedDB. Every
+    // repository's own writeAuditRow() wrapper writes here as a side
+    // effect of a normal action across every role, so create is broad —
+    // any signed-in active user, not just those with audit.view — the
+    // same asymmetry already accepted for ledgerEntries (Milestone 21).
+    // Read is audit.view, held by Administrator alone (app.config.js's
+    // ROLES table). No update/delete path exists anywhere in the app —
+    // an audit entry is append-only by design.
+    match /auditLog/{entryId} {
+      allow read: if isAdministrator();
+      allow create: if isProvisionedActiveUser();
+      allow update, delete: if false;
     }
 
     match /{document=**} {

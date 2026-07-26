@@ -15,13 +15,13 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
-import { uid, sequenceNumber } from '../utils/id.js';
-import { localDate, nowISO, academicYearOf, ageFrom } from '../utils/date.js';
+import { sequenceNumber } from '../utils/id.js';
+import { localDate, academicYearOf, ageFrom } from '../utils/date.js';
 import { ADMISSION_STATUS, STUDENT_STATUS, LEVELS, levelLabel } from '../config/app.config.js';
 import {
     admissions$, drafts$, students$, batches$, feePlans$, branches$, settings$
 } from '../data/repositories.js';
+import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 import { raiseSchedule } from './fees.service.js';
 import { notify } from './notifications.service.js';
 
@@ -332,7 +332,6 @@ export async function enrolApplicant(admissionId, { batchId, feePlanId = null, j
 
     const year = academicYearOf().start;
     const seq = await settings$.nextSequence('admission');
-    const at = nowISO();
     const actor = session.actorId();
 
     // Persisted through the Students repository (students$.create()) rather
@@ -374,11 +373,10 @@ export async function enrolApplicant(admissionId, { batchId, feePlanId = null, j
     // rather than a hand-rolled write, for the same reason as the student
     // write above — this goes wherever `admissions$` actually points,
     // IndexedDB before Milestone 5, Firestore since. The admission update
-    // and the audit row below are now two sequential calls rather than one
-    // atomic IndexedDB transaction (Firestore and the auditLog store are
-    // two different databases) — the admission is closed first, so a
-    // failure writing the audit row leaves an enrolled application without
-    // an audit entry rather than an application stuck mid-enrolment.
+    // and the audit row below are two sequential Firestore writes, not one
+    // atomic transaction — the admission is closed first, so a failure
+    // writing the audit row leaves an enrolled application without an
+    // audit entry rather than an application stuck mid-enrolment.
     const closedApplication = await admissions$.update(admission.id, {
         status: ADMISSION_STATUS.ENROLLED,
         enrolledOn: localDate(),
@@ -386,11 +384,8 @@ export async function enrolApplicant(admissionId, { batchId, feePlanId = null, j
         studentId: student.id
     });
 
-    await db.put('auditLog', {
-        id: uid('AUD'), entity: 'Admission', entityId: admission.id, action: 'enrol',
-        detail: { studentId: student.id, admissionNo: student.admissionNo, batchId: batch.id },
-        actorId: actor, actorName: session.actorName(), at
-    });
+    await recordAuditEntry('Admission', 'enrol', admission.id,
+        { studentId: student.id, admissionNo: student.admissionNo, batchId: batch.id });
 
     bus.emit(EVENTS.ADMISSION_ENROLLED, { admission: closedApplication, student });
     bus.emit(EVENTS.STUDENT_CREATED, { student });

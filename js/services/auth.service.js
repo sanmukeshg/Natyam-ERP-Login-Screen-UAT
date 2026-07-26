@@ -25,12 +25,10 @@
  */
 
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
 import { bus, EVENTS } from '../core/bus.js';
-import { uid } from '../utils/id.js';
-import { nowISO } from '../utils/date.js';
 import { users$ } from '../data/repositories.js';
 import { sessions$ } from '../data/sessions.repository.firestore.js';
+import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 import { googleProvider } from './auth/providers/googleProvider.js';
 import { mobileOtpProvider } from './auth/providers/mobileOtpProvider.js';
 
@@ -48,24 +46,13 @@ const SESSION_RECORD_KEY = 'natyam.sessionRecordId';
 const SESSION_PROVIDER_KEY = 'natyam.sessionProviderId';
 
 /**
- * Writes directly to the auditLog store rather than through a Repository's
- * `_audit()` (there is no "Auth" entity to attach one to) or through
- * audit.service.js's `auditRow()` helper, which always attributes the
- * current session — wrong here, since sign-in runs before (or instead of)
- * that session existing. The row shape matches both exactly. Audit logging
- * itself stays on IndexedDB in this phase; only Auth and Users have moved.
+ * Calls into the shared auditLog writer with an explicit `actor` override —
+ * sign-in runs before (or instead of) a session existing, so the row can't
+ * always be attributed via `session.actorId()` the way every other
+ * repository's writeAuditRow() does.
  */
 async function writeAuditRow(entityId, action, detail, actor = null) {
-    await db.put('auditLog', {
-        id: uid('AUD'),
-        entity: 'Auth',
-        entityId,
-        action,
-        detail: detail || null,
-        actorId: actor?.id || session.actorId(),
-        actorName: actor?.name || session.actorName(),
-        at: nowISO()
-    });
+    await recordAuditEntry('Auth', action, entityId, detail, actor);
 }
 
 /** The provider id an identity came from — our own providers set `.provider`; a restored Firebase User is asked directly. */
