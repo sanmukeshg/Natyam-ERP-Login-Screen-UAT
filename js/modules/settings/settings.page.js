@@ -962,6 +962,9 @@ export default class SettingsPage extends Page {
             fields: [
                 { name: 'name', label: 'Name', required: true, width: 'half', value: user?.name },
                 { name: 'email', label: 'Email', type: 'email', width: 'half', value: user?.email },
+                { name: 'mobile', label: 'Mobile number', type: 'tel', width: 'half', value: user?.mobile,
+                  placeholder: '+91 XXXXX XXXXX',
+                  hint: 'Required if Mobile OTP is checked below. Must be unique — no two accounts can share a number.' },
                 {
                     name: 'role', label: 'Role', type: 'select', required: true, width: 'half',
                     value: user?.role || 'teacher_reception',

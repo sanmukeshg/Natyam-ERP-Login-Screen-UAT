@@ -501,6 +501,10 @@ export async function createUser(data) {
     const clash = record.email && (await users$.all()).find((u) => u.email === record.email);
     if (clash) throw new Error(`${clash.name} already uses that email address.`);
 
+    if (authMethods.includes('mobile') && !record.mobile) {
+        throw new Error('A mobile number is required for Mobile OTP sign-in.');
+    }
+
     // Mobile numbers are unique across the whole system — Mobile OTP
     // resolves an incoming identity by phone number alone (findByMobile()),
     // so two active accounts sharing one number would make that resolution
@@ -549,6 +553,10 @@ export async function updateUser(id, changes) {
                 throw new Error('At least one authentication method must remain enabled for your own account.');
             }
             throw new Error('Choose at least one sign-in method.');
+        }
+
+        if (changes.authMethods.includes('mobile') && !changes.mobile) {
+            throw new Error('A mobile number is required for Mobile OTP sign-in.');
         }
     }
 
