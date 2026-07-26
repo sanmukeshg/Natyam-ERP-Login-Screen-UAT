@@ -37,9 +37,17 @@ class Session {
         this.user = user;
         this.branches = branches || [];
 
+        // No explicit or remembered choice, or a remembered branch that no
+        // longer exists (e.g. after a restore changed the branch set), lands
+        // on null — "All branches" — never silently narrows to branches[0].
+        // Every role can already choose "All branches" from the switcher
+        // (shell.js) — defaulting away from it here was a real, user-visible
+        // bug: a fresh session (or one after "Erase everything"/a restore
+        // clears the stored choice) always looked scoped to whichever
+        // branch happened to sort first, not "all of them."
         const remembered = this._readStored().activeBranchId;
-        const candidate = activeBranchId || remembered || this.branches[0]?.id || null;
-        this.activeBranchId = this.branches.some((b) => b.id === candidate) ? candidate : (this.branches[0]?.id || null);
+        const candidate = activeBranchId || remembered || null;
+        this.activeBranchId = candidate && this.branches.some((b) => b.id === candidate) ? candidate : null;
 
         this._capabilities = new Set(roleCapabilities(user?.role));
         this._lastActivityAt = Date.now();
