@@ -38,6 +38,25 @@ const FILE_KIND = 'natyam-erp-backup';
 // IndexedDB precedent belong here too.
 const FIRESTORE_ONLY_SECTIONS = ['classSessions'];
 
+// Store name -> the Firestore repository that now actually holds this data,
+// for every section buildBackup() already overrides with a live read below.
+// exportStore() (single-section export) used to skip straight to
+// db.all(storeName) for every store, which was correct once and is now
+// simply wrong for these 22 — they moved off IndexedDB, so db.all() returns
+// whatever stale rows were last written there (seed.js's original demo data,
+// for a store that has never been touched since), not what the app or a
+// real backup actually shows.
+const FIRESTORE_STORE_REPOS = {
+    students: students$, admissions: admissions$, attendance: attendance$,
+    programs: programs$, certificates: certificates$, batches: batches$, staff: staff$,
+    feePlans: feePlans$, invoices: invoices$, payments: payments$,
+    ledgerEntries: ledger$, expenses: expenses$, salaries: salaries$,
+    documents: documents$, admissionDrafts: drafts$, notifications: notifications$,
+    branches: branches$, academicYears: academicYears$, curricula: curricula$,
+    curriculumLevels: curriculumLevels$, holidays: holidays$,
+    auditLog: audit$
+};
+
 /* ==========================================================================
    EXPORT
    ========================================================================== */
@@ -321,7 +340,8 @@ export async function exportStore(storeName, { pretty = true } = {}) {
 
     if (!STORE_NAMES.includes(storeName)) throw new Error(`There is no "${storeName}" data to export.`);
 
-    const rows = await db.all(storeName);
+    const repo = FIRESTORE_STORE_REPOS[storeName];
+    const rows = repo ? await repo.all({ includeDeleted: true }) : await db.all(storeName);
     const payload = {
         kind: 'natyam-erp-extract',
         store: storeName,
