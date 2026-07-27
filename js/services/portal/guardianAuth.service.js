@@ -35,14 +35,12 @@ import { bus, EVENTS } from '../../core/bus.js';
  */
 async function guardianChildren(phone, email) {
     const [byPhone, byEmail] = await Promise.all([
-        phone ? students$.where('guardianPhone', phone) : Promise.resolve([]),
-        email ? students$.where('guardianEmail', email) : Promise.resolve([])
+        phone ? students$.whereActive('guardianPhone', phone) : Promise.resolve([]),
+        email ? students$.whereActive('guardianEmail', email) : Promise.resolve([])
     ]);
 
     const seen = new Map();
-    for (const student of [...byPhone, ...byEmail]) {
-        if (student.status === 'active') seen.set(student.id, student);
-    }
+    for (const student of [...byPhone, ...byEmail]) seen.set(student.id, student);
     return [...seen.values()];
 }
 

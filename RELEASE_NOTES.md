@@ -1,3 +1,21 @@
+# Release Notes — NATYAM ERP v2.17.2
+
+**Release:** Patch — Guardian Sign-In Fix
+**Date:** 28 July 2026
+**Baseline:** v2.17.1
+**Type:** Bug fix, found during the first real guardian sign-in attempt against live Firebase. Every guardian sign-in (Google, Mobile OTP, Email & Password) failed with "Missing or insufficient permissions" — a client-side query bug, not a rules bug. No `firestore.rules` change and nothing to republish this time.
+
+## For administrators / IT
+
+- No manual step needed — this is a code-only fix, no rules republish, no Firestore index to create.
+- Retry a guardian sign-in now (Google/Mobile OTP/Email & Password, using a phone or email already on file as a student's `guardianPhone`/`guardianEmail`) — it should now reach the portal instead of showing a permissions error.
+
+## What changed
+
+- The guardian portal's own lookup query only checked the guardian's phone/email, then checked "is this student active" afterward in JavaScript — but Firestore requires a query's own filters to prove the security rule holds *before* it runs the query at all, and the rule also requires the student to be active. Fixed by including that check directly in the query.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.1
 
 **Release:** Patch — Restore-from-Backup Fix + Login Screen Cleanup

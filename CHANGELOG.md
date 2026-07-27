@@ -9,6 +9,15 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.2] — 2026-07-28 — Guardian Sign-In Fix
+
+Direct follow-up after the first real guardian sign-in attempt against live Firebase surfaced a bug the milestone report had flagged as untested: the guardian portal's own lookup query didn't match what `firestore.rules` requires it to prove, so every guardian sign-in (Google, Mobile OTP, or Email/Password) failed with "Missing or insufficient permissions" before ever reaching the portal.
+
+### Fixed
+- **Guardian sign-in always failed with a permissions error.** Firestore only allows a *query* (as opposed to a single-document read) when its own `where()` filters can prove the security rule holds for every possible match — it does not run the query and filter the results afterward. `firestore.rules`' `isGuardianOfStudent()` checks both `status == 'active'` and the guardian's phone/email, but `guardianAuth.service.js`'s lookup query only filtered on phone/email, checking `status` in JavaScript after the fact. Firestore rejected the whole query outright. Fixed with a new `students$.whereActive()` repository method that includes `status == 'active'` directly in the query, matching the rule exactly. No `firestore.rules` change and no manual Firestore index needed — this was a client-side query bug, not a rules bug.
+
+---
+
 ## [2.17.1] — 2026-07-27 — Restore-from-Backup Fix + Login Screen Cleanup
 
 Direct follow-up after live UAT restore testing surfaced a real, previously-undiscovered bug: a second restore attempt (once a collection already had documents from an earlier one) silently aborted partway through, leaving Students restored but Batches/Staff/Invoices/etc. untouched.

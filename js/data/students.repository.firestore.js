@@ -138,6 +138,26 @@ class FirestoreStudentRepository {
         return snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(visible);
     }
 
+    /**
+     * Same as where(), plus an explicit status=='active' filter — required
+     * for any query firestore.rules' isGuardianOfStudent() must authorize.
+     * Firestore denies a whole query outright (not a partial filter) unless
+     * the query's own where() clauses can prove the rule holds for every
+     * possible match; the rule checks both status=='active' and the field
+     * being queried, so a query missing the status filter is rejected with
+     * "Missing or insufficient permissions" before it ever runs. Confirmed
+     * 2026-07-28 against a real guardian sign-in attempt. Used only by
+     * js/services/portal/guardianAuth.service.js.
+     */
+    async whereActive(index, value) {
+        const snap = await getDocs(query(
+            studentsCollection,
+            where(index, '==', value),
+            where('status', '==', 'active')
+        ));
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(visible);
+    }
+
     async count(index, value) {
         if (!index) return (await this.all()).length;
         return (await this.where(index, value)).length;
