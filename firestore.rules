@@ -28,10 +28,19 @@
 // Milestone P1 added a second, unrelated identity: a Parent/Student Portal
 // guardian, who has no /users doc and no role at all — just an authenticated
 // caller whose phone/email token claim matches a guardianPhone/guardianEmail
-// already on file for one or more active students (isGuardianOfStudent()/
-// isGuardianOfStudentId() below). This only ever widens `allow read` on
-// students/attendance/certificates/invoices/payments; every write rule and
-// every other collection's rules are unchanged.
+// already on file for one or more active students (isGuardianOfStudent()
+// below). This only ever widens `allow read` on students; every write rule
+// and every other collection's rules are unchanged.
+//
+// A per-studentId lookup (isGuardianOfStudentId()) was tried on attendance/
+// certificates/invoices/payments too and reverted 2026-07-27: Firestore caps
+// get()/exists() calls at 10 for an entire query, not per document, and a
+// full-collection read (a backup's safety copy, attendance$.replaceAll(),
+// etc.) touches far more than 10 distinct students — it denied the whole
+// query with "Missing or insufficient permissions" and broke a live restore.
+// The portal's Timetable/Attendance/Programmes/Certificates/Fees pages are
+// not yet server-side-authorized beyond students/{id} itself until that's
+// redesigned with a denormalized field (see isGuardianOfStudent()'s comment).
 //
 // Everything outside `users`/`meta`/`sessions`/`students`/`admissions`/
 // `attendance`/`classSessions`/`programs`/`certificates`/`batches`/`staff`/
@@ -167,15 +176,19 @@ service cloud.firestore {
       );
     }
 
-    // One-hop lookup for collections carrying a single studentId field
-    // (attendance, certificates, invoices, payments) rather than the
-    // student record itself — exists() first, same reasoning as
-    // isProvisionedActiveUser() above.
-    function isGuardianOfStudentId(studentId) {
-      return studentId != null
-        && exists(/databases/$(database)/documents/students/$(studentId))
-        && isGuardianOfStudent(get(/databases/$(database)/documents/students/$(studentId)).data);
-    }
+    // REMOVED (2026-07-27): a per-document get() on a different /students/{id}
+    // path for every distinct studentId is not viable on attendance/
+    // certificates/invoices/payments — Firestore caps get()/exists() calls at
+    // 10 for an ENTIRE query, not per document, and a full-collection read
+    // (buildBackup()'s safety copy, attendance$.replaceAll(), etc.) touches
+    // far more than 10 distinct students. It silently denied the whole query
+    // with "Missing or insufficient permissions" and broke a live restore.
+    // The correct fix — denormalizing guardianPhone/guardianEmail directly
+    // onto those four collections' own documents, the same trick already
+    // used for batchSchedule/programmes on students — is follow-up work, not
+    // done here. Guardian read access to students/{id} itself is unaffected
+    // (isGuardianOfStudent() above is a direct field comparison, no extra
+    // read, and was never the problem).
 
     match /users/{userId} {
       // A person may always read their own record (to resolve their own
@@ -282,9 +295,7 @@ service cloud.firestore {
     // Service layer (attendance.service.js's postRegister()), not
     // duplicated here as a field-value rule.
     match /attendance/{attendanceId} {
-      // A guardian may additionally read only their own child's own
-      // attendance rows (Milestone P1).
-      allow read: if canViewAttendance() || isGuardianOfStudentId(resource.data.studentId);
+      allow read: if canViewAttendance();
       allow create, update: if canMarkAttendance();
 
       // Hard delete (students.service.js's deleteStudent(), which removes
@@ -358,9 +369,7 @@ service cloud.firestore {
       // The Certificates page is gated client-side by program.view, itself
       // granted to every role — Administrator, Owner & Accountant, Teacher
       // & Reception, Viewer alike — so every provisioned user can read here.
-      // A guardian may additionally read only their own child's own
-      // certificates (Milestone P1).
-      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
+      allow read: if isProvisionedActiveUser();
       allow create, update: if canIssueCertificates();
       allow delete: if isAdministrator();
     }
@@ -473,18 +482,14 @@ service cloud.firestore {
     // (raise/pay/refund/waive/cancel) field-by-field, the same reasoning
     // already used for Admissions' status transitions.
     match /invoices/{invoiceId} {
-      // A guardian may additionally read only their own child's own
-      // invoices — view-only, never create/update (Milestone P1).
-      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
+      allow read: if isProvisionedActiveUser();
       allow create: if canCollectFees();
       allow update: if canCollectFees() || canRefundFees() || canWaiveFees();
       allow delete: if false;
     }
 
     match /payments/{paymentId} {
-      // A guardian may additionally read only their own child's own
-      // payments — view-only, never create/update (Milestone P1).
-      allow read: if isProvisionedActiveUser() || isGuardianOfStudentId(resource.data.studentId);
+      allow read: if isProvisionedActiveUser();
       allow create: if canCollectFees();
       // Only refundPayment() ever updates an existing payment record.
       allow update: if canRefundFees();
