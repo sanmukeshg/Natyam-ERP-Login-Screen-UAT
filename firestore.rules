@@ -42,6 +42,20 @@
 // not yet server-side-authorized beyond students/{id} itself until that's
 // redesigned with a denormalized field (see isGuardianOfStudent()'s comment).
 //
+// 2026-07-27, separately: every repository's replaceAll() (used only by
+// restore-from-backup) hard-deletes every existing document in a collection
+// before recreating it. Several collections had `allow delete: if false`
+// (a deliberate "no hard delete in the normal app UI" policy, unrelated to
+// restore) — fine on a first-ever restore with nothing to delete, but it
+// silently aborted any later restore the moment that collection already had
+// documents, part-way through the fixed write sequence, leaving whatever
+// ran before the failure in place and everything after it untouched. Fixed
+// by opening `delete` to Administrator alone on admissions/classSessions/
+// programs/batches/staff/invoices/payments/branches/academicYears/
+// curricula/salaries/expenses/auditLog — the same role already gated
+// behind backup.manage to reach restore() at all. `update` stays denied
+// wherever it already was (auditLog stays append-only otherwise).
+//
 // Everything outside `users`/`meta`/`sessions`/`students`/`admissions`/
 // `attendance`/`classSessions`/`programs`/`certificates`/`batches`/`staff`/
 // `feePlans`/`invoices`/`payments`/`ledgerEntries`/`expenses`/`salaries`/
@@ -281,11 +295,13 @@ service cloud.firestore {
       // section for this disclosed simplification.
       allow update: if canManageAdmissions() || canApproveAdmissions();
 
-      // No hard-delete path exists in the application today (admissions
-      // are only ever soft-deleted, and even that isn't currently wired
-      // into any UI or service function) — denied outright rather than
-      // granted speculatively ahead of a real need.
-      allow delete: if false;
+      // No hard-delete path exists in the normal app UI (admissions are
+      // only ever soft-deleted) — but admissions$.replaceAll() (restore
+      // from a backup) does a real delete-then-recreate on this
+      // collection, and 2026-07-27 confirmed that fails outright once the
+      // collection already has documents if this stays `false` for
+      // everyone. Administrator-only, matching backup.manage's own gate.
+      allow delete: if isAdministrator();
     }
 
     // Milestone 6 (see ADR-014). No Leave concept exists in NATYAM; Holiday
@@ -317,10 +333,11 @@ service cloud.firestore {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageStudents();
 
-      // No delete path exists — a Session is never removed, only
-      // transitioned to Postponed/Cancelled/Completed; history is
-      // permanent by design.
-      allow delete: if false;
+      // A Session is never removed via the normal UI, only transitioned to
+      // Postponed/Cancelled/Completed — but classSessions$.replaceAll()
+      // (restore from a backup) needs a real delete-then-recreate here,
+      // same reasoning as admissions above. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // program.edit is granted to exactly these two roles — kept as its own
@@ -343,10 +360,11 @@ service cloud.firestore {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManagePrograms();
 
-      // No hard-delete path exists in the application today (a programme
-      // is only ever soft-deleted, and even that isn't currently wired
-      // into any UI) — denied outright rather than granted speculatively.
-      allow delete: if false;
+      // No hard-delete path exists in the normal app UI (a programme is
+      // only ever soft-deleted) — but programs$.replaceAll() (restore from
+      // a backup) needs a real delete-then-recreate here, same reasoning
+      // as admissions above. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // certificate.issue is granted only to Administrator (see
@@ -386,10 +404,14 @@ service cloud.firestore {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageStudents();
 
-      // No hard-delete path exists in the application today (a batch is
-      // only ever closed via update(), never removed) — denied outright
-      // rather than granted speculatively.
-      allow delete: if false;
+      // No hard-delete path exists in the normal app UI (a batch is only
+      // ever closed via update()) — but batches$.replaceAll() (restore
+      // from a backup) needs a real delete-then-recreate here; confirmed
+      // 2026-07-27 that leaving this `false` for everyone silently aborts
+      // a restore the moment the collection already has documents (the
+      // exact bug behind students showing "Not placed" after a second
+      // restore attempt). Administrator-only, matching backup.manage.
+      allow delete: if isAdministrator();
     }
 
     // staff.edit is granted only to Administrator (see app.config.js's
@@ -411,7 +433,12 @@ service cloud.firestore {
       // Teacher & Reception, Viewer alike.
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageStaff();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI (deactivate/
+      // reactivate only) — but staff$.replaceAll() (restore from a
+      // backup) needs a real delete-then-recreate here, same reasoning as
+      // batches above. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // Milestone 21 (see ADR-014). Fee Collection and Finance migrated
@@ -485,7 +512,12 @@ service cloud.firestore {
       allow read: if isProvisionedActiveUser();
       allow create: if canCollectFees();
       allow update: if canCollectFees() || canRefundFees() || canWaiveFees();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI (waive/cancel are
+      // updates) — but invoices$.replaceAll() (restore from a backup)
+      // needs a real delete-then-recreate here, same reasoning as
+      // admissions above. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     match /payments/{paymentId} {
@@ -493,7 +525,11 @@ service cloud.firestore {
       allow create: if canCollectFees();
       // Only refundPayment() ever updates an existing payment record.
       allow update: if canRefundFees();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI — but
+      // payments$.replaceAll() (restore from a backup) needs a real
+      // delete-then-recreate here. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // Written by fee collection (a payment/refund posting) as well as
@@ -513,13 +549,21 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if canViewFinance();
       allow create, update: if canManageFinance();
-      allow delete: if false;
+
+      // removeExpense() always soft-deletes — but expenses$.replaceAll()
+      // (restore from a backup) needs a real delete-then-recreate here.
+      // Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     match /salaries/{salaryId} {
       allow read: if canViewFinance();
       allow create, update: if canManageFinance();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI — but
+      // salaries$.replaceAll() (restore from a backup) needs a real
+      // delete-then-recreate here. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // Milestone 22 (see ADR-014). Documents, Admission Drafts and
@@ -585,19 +629,31 @@ service cloud.firestore {
     match /branches/{branchId} {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageSettings();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI (closeBranch() is
+      // an update) — but branches$.replaceAll() (restore from a backup)
+      // needs a real delete-then-recreate here. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     match /academicYears/{yearId} {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageSettings();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI — but
+      // academicYears$.replaceAll() (restore from a backup) needs a real
+      // delete-then-recreate here. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     match /curricula/{curriculumId} {
       allow read: if isProvisionedActiveUser();
       allow create, update: if canManageSettings();
-      allow delete: if false;
+
+      // No hard-delete path exists in the normal app UI — but
+      // curricula$.replaceAll() (restore from a backup) needs a real
+      // delete-then-recreate here. Administrator-only.
+      allow delete: if isAdministrator();
     }
 
     // No write path exists anywhere in the app today — levels are
@@ -628,7 +684,14 @@ service cloud.firestore {
     match /auditLog/{entryId} {
       allow read: if isAdministrator();
       allow create: if isProvisionedActiveUser();
-      allow update, delete: if false;
+
+      // An audit entry is append-only by design — no update path exists,
+      // or should ever exist. But audit$.replaceAll() (restore from a
+      // backup) needs a real delete (of the old entries) before it
+      // recreates them, so delete alone is opened to Administrator;
+      // update stays permanently denied.
+      allow update: if false;
+      allow delete: if isAdministrator();
     }
 
     match /{document=**} {

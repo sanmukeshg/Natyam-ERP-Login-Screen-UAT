@@ -1,3 +1,24 @@
+# Release Notes — NATYAM ERP v2.17.1
+
+**Release:** Patch — Restore-from-Backup Fix + Login Screen Cleanup
+**Date:** 27 July 2026
+**Baseline:** v2.17.0
+**Type:** Bug fix, found during live UAT restore testing. A second restore-from-backup attempt silently stopped partway through — Students came back but Batches, Staff, Invoices and several others didn't, because `firestore.rules` denied the hard-delete step `replaceAll()` needs once a collection already has documents. Also: a cosmetic chart bug, and the two redundant "OR" dividers removed from the login screen.
+
+## For administrators / IT
+
+- **`firestore.rules` must be republished again** — Firebase Console → Firestore Database → Rules → Publish. This is the third rules update this cycle; each one is additive/narrowing on top of the last, nothing else changes.
+- **Redo the restore once more** after republishing. It should now run the full sequence (students → admissions → attendance → batches → staff → fees → …) without stopping partway, and Batches/Branch assignment should show correctly afterward.
+- No other manual step.
+
+## What changed
+
+- Restoring from a backup a second time (once Firestore already has data from an earlier restore or normal use) used to silently stop partway through, leaving some collections restored and others untouched — this is why Batches looked wiped after a Students-only restore appeared to succeed. Now fixed: a full restore completes end to end.
+- A monthly chart (e.g. Finance's collection chart) could show a harmless console error and flat/invisible bars when every value in view was zero. Fixed.
+- The login screen no longer shows a stray "OR" divider line between "Forgot password?" and "Continue with Google", or between "Continue with Google" and the Mobile Number field.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.0
 
 **Release:** Phase 2 / Milestone P1 — Parent/Student Portal

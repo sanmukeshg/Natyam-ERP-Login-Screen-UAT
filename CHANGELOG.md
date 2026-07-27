@@ -9,6 +9,21 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.1] — 2026-07-27 — Restore-from-Backup Fix + Login Screen Cleanup
+
+Direct follow-up after live UAT restore testing surfaced a real, previously-undiscovered bug: a second restore attempt (once a collection already had documents from an earlier one) silently aborted partway through, leaving Students restored but Batches/Staff/Invoices/etc. untouched.
+
+### Fixed
+- **`restore()` aborted mid-sequence on any collection that already had documents.** Every repository's `replaceAll()` (restore's only caller) hard-deletes every existing document in a collection before recreating it — but `admissions`/`classSessions`/`programs`/`batches`/`staff`/`invoices`/`payments`/`branches`/`academicYears`/`curricula`/`salaries`/`expenses`/`auditLog` all had `allow delete: if false` in `firestore.rules` (a deliberate "no hard delete in the normal app UI" policy, unrelated to restore). Fine on a first-ever restore with nothing to delete; on any later one, the delete step was denied outright and the whole restore stopped there, silently leaving everything after that point in the write sequence untouched — the exact cause of students showing "Not placed" with correctly-restored branches but no batches at all. Fixed by opening `delete` to Administrator alone on those thirteen collections — the same role already required to reach `restore()` in the first place. `update` stays denied wherever it already was (`auditLog` stays append-only).
+- **Bar charts rendered `NaN`-height bars** (`js/ui/chart.js`'s `barChart()`) whenever every value in a series was zero (e.g. a month with no fee collections) — a division by a zero "ceiling" produced `NaN`, logged by the browser as repeated `<rect>` attribute errors. Bars now render at zero height instead.
+- **Removed the redundant "OR" dividers** on the login screen — one between "Forgot password?" and "Continue with Google", one between "Continue with Google" and the Mobile Number field.
+
+### Manual steps before this works
+- **The updated `firestore.rules` must be republished again** (third time this milestone) — Firebase Console → Firestore Database → Rules → Publish.
+- **Redo the restore once more** after republishing; it should now complete the full sequence without stopping partway.
+
+---
+
 ## [2.17.0] — 2026-07-26 — Parent/Student Portal (Milestone P1)
 
 A guardian can now sign in and see, read-only, exactly their own child's own batch, timetable, attendance rate (week/month), programmes, certificates, and fee dues — never another family's data, never a staff/finance/admin screen, and no payment-collection UI anywhere in it. This is the milestone `mobileOtpProvider.js`'s own header comment anticipated when it was built for Milestone A1.

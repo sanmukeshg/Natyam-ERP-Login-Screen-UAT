@@ -99,7 +99,9 @@ export function barChart(series, {
     }).join('') : '';
 
     const bars = series.map((point, index) => {
-        const barHeight = Math.max((point.value / ceiling) * plotHeight, point.value > 0 ? 2 : 0);
+        const barHeight = ceiling > 0
+            ? Math.max((point.value / ceiling) * plotHeight, point.value > 0 ? 2 : 0)
+            : 0;
         const x = padLeft + slot * index + (slot - barWidth) / 2;
         const y = padTop + plotHeight - barHeight;
         const isLast = highlightLast && index === series.length - 1;

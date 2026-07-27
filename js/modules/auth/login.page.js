@@ -154,14 +154,10 @@ export function renderLogin(container, { initialError = null } = {}) {
                         <button class="btn-link" type="button" data-role="forgot-btn">Forgot password?</button>
                     </form>
 
-                    <div class="divider divider-labelled">OR</div>
-
                     <button class="btn btn-secondary btn-block" type="button" data-role="google-btn">
                         ${raw(GOOGLE_G_ICON)}
                         <span>Continue with Google</span>
                     </button>
-
-                    <div class="divider divider-labelled">OR</div>
 
                     <div data-role="otp-request">
                         <div class="field">
