@@ -134,6 +134,52 @@ class FirestoreInvoiceRepository {
             .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || ''));
     }
 
+    /**
+     * Milestone P2 (Parent/Student Portal). Every invoice across every one
+     * of a guardian's children — filtered by `guardianPhone`/`guardianEmail`
+     * directly on the invoice document, never by `studentId`. firestore.rules
+     * can only authorize a query when its own where() filter matches exactly
+     * what the guardian read rule checks; a studentId-based query would be
+     * denied outright regardless of the rule. Callers narrow to one child
+     * client-side (see guardianAuth.service.js's guardianChildren()).
+     */
+    async forGuardian(phone, email) {
+        const [byPhone, byEmail] = await Promise.all([
+            phone ? getDocs(query(invoicesCollection, where('guardianPhone', '==', phone))) : null,
+            email ? getDocs(query(invoicesCollection, where('guardianEmail', '==', email))) : null
+        ]);
+
+        const seen = new Map();
+        for (const snap of [byPhone, byEmail]) {
+            if (!snap) continue;
+            for (const d of snap.docs) {
+                const record = { id: d.id, ...d.data() };
+                if (visible(record)) seen.set(d.id, record);
+            }
+        }
+        return [...seen.values()].sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || ''));
+    }
+
+    /**
+     * Backfill use only (js/migrations/guardianFieldsBackfillMigration.js).
+     * Chunked writeBatch field-only updates — deliberately bypasses this
+     * repository's own per-record audit-row write, since a single run can
+     * touch thousands of existing records and per-record audit writes here
+     * would repeat the exact Firestore-quota exhaustion a restore's
+     * per-record writes already caused once this session.
+     */
+    async bulkSetGuardianFields(updates) {
+        for (let i = 0; i < updates.length; i += 450) {
+            const chunk = updates.slice(i, i + 450);
+            const batch = writeBatch(firestore);
+            for (const { id, guardianPhone, guardianEmail } of chunk) {
+                batch.update(doc(firestore, COLLECTION_NAME, id), { guardianPhone, guardianEmail });
+            }
+            await batch.commit();
+        }
+        return updates.length;
+    }
+
     async outstanding(branchId = null) {
         const rows = (await this.all()).filter((i) =>
             [INVOICE_STATUS.OPEN, INVOICE_STATUS.PARTIAL, INVOICE_STATUS.OVERDUE].includes(i.status));

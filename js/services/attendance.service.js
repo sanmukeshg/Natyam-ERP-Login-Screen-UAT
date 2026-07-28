@@ -163,7 +163,16 @@ export async function postRegister({ batchId, date, entries }) {
         throw new Error(`That date is ${age} days ago. Attendance can only be marked or corrected within 30 days.`);
     }
 
-    const { records, corrections, wasUpdate } = await attendance$.postMany(batchId, date, batch.branchId, entries, classSession.id);
+    // Milestone P2 (Parent/Student Portal): a guardian reads attendance by
+    // querying guardianPhone/guardianEmail directly on the attendance
+    // document itself (no per-document lookup back to `students` — see
+    // firestore.rules' own history of why that breaks). One roster read
+    // (already made by openRegister() for the same reason) gives every
+    // entry's guardian contact at no extra cost per row.
+    const roster = await students$.byBatch(batchId);
+    const guardianByStudent = new Map(roster.map((s) => [s.id, { guardianPhone: s.guardianPhone || null, guardianEmail: s.guardianEmail || null }]));
+
+    const { records, corrections, wasUpdate } = await attendance$.postMany(batchId, date, batch.branchId, entries, classSession.id, guardianByStudent);
 
     // A Scheduled session becomes Completed the moment its register is
     // actually posted — a no-op if it's already Completed (a correction),

@@ -78,6 +78,51 @@ class FirestoreAttendanceRepository {
         return rows.sort((a, b) => b.date.localeCompare(a.date));
     }
 
+    /**
+     * Milestone P2 (Parent/Student Portal). Every record across every one of
+     * a guardian's children — filtered by `guardianPhone`/`guardianEmail`
+     * directly on the attendance document, never by `studentId`. This is
+     * deliberate, not incidental: firestore.rules can only authorize a query
+     * when its own where() filter matches exactly the field the guardian
+     * read rule checks (see that rule's own comment) — a studentId-based
+     * query would be denied outright regardless of what the rule says.
+     * Callers narrow to one child client-side, the same shape
+     * guardianAuth.service.js's guardianChildren() already established.
+     */
+    async forGuardian(phone, email) {
+        const [byPhone, byEmail] = await Promise.all([
+            phone ? getDocs(query(attendanceCollection, where('guardianPhone', '==', phone))) : null,
+            email ? getDocs(query(attendanceCollection, where('guardianEmail', '==', email))) : null
+        ]);
+
+        const seen = new Map();
+        for (const snap of [byPhone, byEmail]) {
+            if (!snap) continue;
+            for (const d of snap.docs) seen.set(d.id, { id: d.id, ...d.data() });
+        }
+        return [...seen.values()].sort((a, b) => b.date.localeCompare(a.date));
+    }
+
+    /**
+     * Backfill use only (js/migrations/guardianFieldsBackfillMigration.js).
+     * Chunked writeBatch field-only updates — deliberately bypasses this
+     * repository's own per-record audit-row write, since a single run can
+     * touch thousands of existing records and per-record audit writes here
+     * would repeat the exact Firestore-quota exhaustion a restore's
+     * per-record writes already caused once this session.
+     */
+    async bulkSetGuardianFields(updates) {
+        for (let i = 0; i < updates.length; i += 450) {
+            const chunk = updates.slice(i, i + 450);
+            const batch = writeBatch(firestore);
+            for (const { id, guardianPhone, guardianEmail } of chunk) {
+                batch.update(doc(firestore, COLLECTION_NAME, id), { guardianPhone, guardianEmail });
+            }
+            await batch.commit();
+        }
+        return updates.length;
+    }
+
     async onDate(date, branchId = null) {
         const snap = await getDocs(query(attendanceCollection, where('date', '==', date)));
         const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -106,9 +151,14 @@ class FirestoreAttendanceRepository {
      *   belongs to (Milestone 7). Attendance never resolves or creates this
      *   itself — session.service.js does, and the id is only ever passed in
      *   by the caller (attendance.service.js's postRegister()).
+     * @param {Map<string, {guardianPhone, guardianEmail}>} [guardianByStudent]
+     *   Milestone P2 — denormalized onto each record so a guardian can read
+     *   their child's attendance without a per-document reverse lookup (see
+     *   forGuardian() above). Built once by the caller from a single roster
+     *   read, not fetched per student here.
      * @returns {Promise<{records: object[], corrections: number}>}
      */
-    async postMany(batchId, date, branchId, entries, sessionId = null) {
+    async postMany(batchId, date, branchId, entries, sessionId = null, guardianByStudent = new Map()) {
         const existing = await this.forBatchOn(batchId, date);
         const priorByStudent = new Map(existing.map((row) => [row.studentId, row]));
         const at = nowISO();
@@ -120,6 +170,7 @@ class FirestoreAttendanceRepository {
 
         for (const entry of entries) {
             const prior = priorByStudent.get(entry.studentId);
+            const guardian = guardianByStudent.get(entry.studentId) || {};
             const record = {
                 batchDate: `${batchId}|${date}|${entry.studentId}`,
                 studentId: entry.studentId,
@@ -135,7 +186,9 @@ class FirestoreAttendanceRepository {
                 createdBy: prior?.createdBy || actor,
                 updatedAt: at,
                 updatedBy: actor,
-                correctedFrom: prior && prior.status !== entry.status ? prior.status : null
+                correctedFrom: prior && prior.status !== entry.status ? prior.status : null,
+                guardianPhone: guardian.guardianPhone ?? prior?.guardianPhone ?? null,
+                guardianEmail: guardian.guardianEmail ?? prior?.guardianEmail ?? null
             };
             if (record.correctedFrom) corrections += 1;
 

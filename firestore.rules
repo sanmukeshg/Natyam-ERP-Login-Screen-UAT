@@ -216,12 +216,34 @@ service cloud.firestore {
     // (buildBackup()'s safety copy, attendance$.replaceAll(), etc.) touches
     // far more than 10 distinct students. It silently denied the whole query
     // with "Missing or insufficient permissions" and broke a live restore.
-    // The correct fix — denormalizing guardianPhone/guardianEmail directly
-    // onto those four collections' own documents, the same trick already
-    // used for batchSchedule/programmes on students — is follow-up work, not
-    // done here. Guardian read access to students/{id} itself is unaffected
+    // Guardian read access to students/{id} itself was unaffected
     // (isGuardianOfStudent() above is a direct field comparison, no extra
     // read, and was never the problem).
+
+    // Milestone P2 (2026-07-28) — the follow-up this comment used to point
+    // to: guardianPhone/guardianEmail are now denormalized directly onto
+    // attendance/certificates/invoices/payments documents themselves (see
+    // each service's create path — attendance.service.js#postRegister(),
+    // certificates.service.js#issue(), fees.service.js#createInvoice(), and
+    // ledger.repository.firestore.js#postPayment(), which copies its
+    // invoice's fields rather than re-reading the student). A direct field
+    // comparison here, same shape as isGuardianOfStudent() above, no get().
+    //
+    // Critical for this to actually work as a QUERY (not just a single-
+    // document get): Firestore only authorizes a list request when its own
+    // where() filter can prove this condition holds for every possible
+    // match. The portal's reads on these four collections were rewritten to
+    // query by guardianPhone/guardianEmail directly (each repository's new
+    // forGuardian()) instead of by studentId — a studentId-filtered query
+    // would still be denied outright no matter what this function checks,
+    // the exact failure already hit twice tonight elsewhere (the guardian's
+    // own students query, and users$.findByMobile()).
+    function isGuardianOfRecord(recordData) {
+      return signedIn() && (
+        (callerPhone() != null && recordData.guardianPhone == callerPhone()) ||
+        (hasEmailClaim() && recordData.guardianEmail == request.auth.token.email)
+      );
+    }
 
     match /users/{userId} {
       // A person may always read their own record (to resolve their own
@@ -347,7 +369,7 @@ service cloud.firestore {
     // Service layer (attendance.service.js's postRegister()), not
     // duplicated here as a field-value rule.
     match /attendance/{attendanceId} {
-      allow read: if canViewAttendance();
+      allow read: if canViewAttendance() || isGuardianOfRecord(resource.data);
       allow create, update: if canMarkAttendance();
 
       // Hard delete (students.service.js's deleteStudent(), which removes
@@ -423,7 +445,7 @@ service cloud.firestore {
       // The Certificates page is gated client-side by program.view, itself
       // granted to every role — Administrator, Owner & Accountant, Teacher
       // & Reception, Viewer alike — so every provisioned user can read here.
-      allow read: if isProvisionedActiveUser();
+      allow read: if isProvisionedActiveUser() || isGuardianOfRecord(resource.data);
       allow create, update: if canIssueCertificates();
       allow delete: if isAdministrator();
     }
@@ -545,7 +567,7 @@ service cloud.firestore {
     // (raise/pay/refund/waive/cancel) field-by-field, the same reasoning
     // already used for Admissions' status transitions.
     match /invoices/{invoiceId} {
-      allow read: if isProvisionedActiveUser();
+      allow read: if isProvisionedActiveUser() || isGuardianOfRecord(resource.data);
       allow create: if canCollectFees();
       allow update: if canCollectFees() || canRefundFees() || canWaiveFees();
 
@@ -557,7 +579,7 @@ service cloud.firestore {
     }
 
     match /payments/{paymentId} {
-      allow read: if isProvisionedActiveUser();
+      allow read: if isProvisionedActiveUser() || isGuardianOfRecord(resource.data);
       allow create: if canCollectFees();
       // Only refundPayment() ever updates an existing payment record.
       allow update: if canRefundFees();

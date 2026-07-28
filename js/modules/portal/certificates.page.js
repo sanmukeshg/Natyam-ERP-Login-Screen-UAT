@@ -1,10 +1,12 @@
 /**
  * NATYAM ERP 2.0 — Parent/Student Portal: Certificates (Milestone P1)
  *
- * certificates$.forStudent(studentId) already existed as a clean,
- * single-studentId-scoped read (js/data/certificates.repository.firestore.js)
- * — reused unchanged, guarded server-side by firestore.rules'
- * isGuardianOfStudentId() on the certificates collection.
+ * Milestone P2: reads via certificates$.forGuardian(phone, email) — every
+ * one of the guardian's children's certificates, queried by
+ * guardianPhone/guardianEmail directly on the certificate document
+ * (required for firestore.rules to authorize the query at all, see
+ * isGuardianOfRecord()'s comment) — then narrowed to the active child
+ * client-side.
  */
 
 import { Page } from '../../core/router.js';
@@ -30,7 +32,8 @@ export default class PortalCertificatesPage extends Page {
         const student = guardianSession.activeChild();
         if (!student) { render(this.container, this.shell(null, [])); return; }
 
-        const certificates = await certificates$.forStudent(student.id);
+        const all = await certificates$.forGuardian(guardianSession.phone, guardianSession.email);
+        const certificates = all.filter((c) => c.studentId === student.id);
         if (this.disposed) return;
         render(this.container, this.shell(student, certificates));
     }

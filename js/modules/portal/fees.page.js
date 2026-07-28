@@ -1,9 +1,11 @@
 /**
  * NATYAM ERP 2.0 — Parent/Student Portal: Fees (Milestone P1)
  *
- * fees.service.js's studentFeeSummary(studentId) already existed as a pure,
- * permission-clean read (no session.require() gate, never touches the
- * separate capability-gated recordPayment() write path) — reused unchanged.
+ * Milestone P2: reads via fees.service.js's guardianFeeSummary(phone,
+ * email, student), which sources invoices/payments from their own
+ * guardian-scoped forGuardian() queries (guardianPhone/guardianEmail
+ * directly on the document, required for firestore.rules to authorize the
+ * query at all) rather than studentFeeSummary()'s studentId-filtered ones.
  * View-only by construction: nothing on this page can collect, refund, or
  * waive a fee, since this file never imports anything that could.
  */
@@ -13,7 +15,7 @@ import { html, render } from '../../utils/dom.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatMoney } from '../../utils/money.js';
 import { formatDate } from '../../utils/date.js';
-import { studentFeeSummary } from '../../services/fees.service.js';
+import { guardianFeeSummary } from '../../services/fees.service.js';
 import { guardianSession } from '../../services/portal/guardianAuth.service.js';
 
 export default class PortalFeesPage extends Page {
@@ -32,7 +34,7 @@ export default class PortalFeesPage extends Page {
         const student = guardianSession.activeChild();
         if (!student) { render(this.container, this.shell(null, null)); return; }
 
-        const fees = await studentFeeSummary(student.id);
+        const fees = await guardianFeeSummary(guardianSession.phone, guardianSession.email, student);
         if (this.disposed) return;
         render(this.container, this.shell(student, fees));
     }

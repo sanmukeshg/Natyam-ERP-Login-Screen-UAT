@@ -9,6 +9,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.18.0] — 2026-07-28 — Milestone P2: Guardian Read Access to Attendance, Certificates, Fees
+
+With the guardian portal now genuinely reachable (v2.17.3–v2.17.6), the three pages that could never work — Attendance, Certificates, Fees — are built out, closing the gap `firestore.rules`' own header comment flagged as follow-up work back on 2026-07-27.
+
+### Added
+- **`guardianPhone`/`guardianEmail` are now denormalized directly onto every new `attendance`, `certificates`, and `invoices` document**, and copied onto every new `payments` document from its parent invoice — the same trick already used for `batchSchedule`/`programmes` on `students`. Written from data already in scope at creation time (`attendance.service.js#postRegister()`, `certificates.service.js#issue()`, `fees.service.js#createInvoice()`, `ledger.repository.firestore.js#postPayment()`), no extra reads.
+- **A new `forGuardian(phone, email)` query method on `attendance$`/`certificates$`/`invoices$`/`payments$`**, querying by `guardianPhone`/`guardianEmail` directly rather than by `studentId` — required, not optional: Firestore only authorizes a *query* when its own `where()` filter can prove the security rule holds for every possible match, and a `studentId`-filtered query cannot prove a `guardianPhone`-based rule, the exact failure already hit twice this week (the guardian's own students query, and `users$.findByMobile()`). The three portal pages (`attendance.page.js`, `certificates.page.js`, a new `guardianFeeSummary()` in `fees.service.js` used by `fees.page.js`) now query this way and narrow to the active child client-side.
+- **`firestore.rules`**: a new `isGuardianOfRecord(recordData)` helper (a direct field comparison, no `get()`, mirroring `isGuardianOfStudent()`) added as an additional `allow read` branch on `attendance`, `certificates`, `invoices`, and `payments` — every other rule on these four collections is untouched.
+- **`js/migrations/guardianFieldsBackfillMigration.js`** (+ `docs/migrations/GUARDIAN_FIELDS_BACKFILL.md`) — an optional, by-hand, one-time utility to add these fields to records that predate this release. Not run automatically; new records already carry the fields without it.
+
+### Manual steps before this works
+- **`firestore.rules` must be republished again** — only the four `allow read` branches and the new helper changed.
+- **Optional**: run the guardian fields backfill (see the doc above) to make pre-existing Attendance/Certificate/Invoice/Payment history visible to guardians in the portal — new records work without it.
+
+---
+
 ## [2.17.6] — 2026-07-28 — Portal Router Authentication Check Fix
 
 Direct follow-up to v2.17.5, found while live-testing a guardian sign-in that now got all the way past identity resolution — and then bounced straight back to the login screen.

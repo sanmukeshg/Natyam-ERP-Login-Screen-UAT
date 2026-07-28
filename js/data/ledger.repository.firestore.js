@@ -304,6 +304,13 @@ export async function postPayment({ invoiceId, amount, mode, reference, note, pa
             invoiceNumber: invoice.number,
             studentId: invoice.studentId,
             studentName: invoice.studentName,
+            // Milestone P2 (Parent/Student Portal): copied straight from the
+            // invoice already read in this transaction, not a fresh student
+            // lookup — a payment always has a parent invoice, and by the
+            // time an invoice exists it already carries these two fields
+            // (see fees.service.js#createInvoice()). Zero extra reads.
+            guardianPhone: invoice.guardianPhone || null,
+            guardianEmail: invoice.guardianEmail || null,
             branchId: invoice.branchId,
             amount, mode,
             reference: reference || null,

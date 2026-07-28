@@ -1,11 +1,14 @@
 /**
  * NATYAM ERP 2.0 — Parent/Student Portal: Attendance (Milestone P1)
  *
- * Week and month attendance rate for the active child — the exact same
- * fetch-then-slice pattern students.service.js's profile() already uses for
- * its own 90-day rate (attendance$.forStudent(studentId, {from,to}) +
- * AttendanceMath.rateOf()/breakdownOf()), just parameterized by week/month
- * instead of a fixed window.
+ * Week and month attendance rate for the active child. Milestone P2: reads
+ * via attendance$.forGuardian(phone, email) — every one of the guardian's
+ * children's records, queried by guardianPhone/guardianEmail directly on
+ * the attendance document (required for firestore.rules to authorize the
+ * query at all, see isGuardianOfRecord()'s comment) — then narrows to the
+ * active child and the week/month window client-side, the same
+ * fetch-then-slice shape students.service.js's profile() already uses for
+ * its own 90-day rate with AttendanceMath.rateOf()/breakdownOf().
  */
 
 import { Page } from '../../core/router.js';
@@ -35,10 +38,10 @@ export default class PortalAttendancePage extends Page {
         const weekStart = startOfWeek(today);
         const monthStart = `${monthKey(today)}-01`;
 
-        const [weekRows, monthRows] = await Promise.all([
-            attendance$.forStudent(student.id, { from: weekStart, to: today }),
-            attendance$.forStudent(student.id, { from: monthStart, to: today })
-        ]);
+        const all = await attendance$.forGuardian(guardianSession.phone, guardianSession.email);
+        const mine = all.filter((r) => r.studentId === student.id);
+        const weekRows = mine.filter((r) => r.date >= weekStart && r.date <= today);
+        const monthRows = mine.filter((r) => r.date >= monthStart && r.date <= today);
 
         if (this.disposed) return;
         render(this.container, this.shell(student, {

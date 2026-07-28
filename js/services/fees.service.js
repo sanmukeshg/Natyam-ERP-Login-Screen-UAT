@@ -307,6 +307,8 @@ export async function createInvoice({ studentId, branchId, feePlanId = null, amo
         number: sequenceNumber('NAT/INV', year, seq),
         studentId: student.id,
         studentName: student.name,
+        guardianPhone: student.guardianPhone || null,
+        guardianEmail: student.guardianEmail || null,
         branchId: branchId || student.branchId,
         feePlanId,
         academicYear: year,
@@ -472,14 +474,8 @@ export async function sweepOverdue() {
     return stale.length;
 }
 
-/** The complete fee position for one student, as the profile page shows it. */
-export async function studentFeeSummary(studentId) {
-    const [invoices, receipts, student] = await Promise.all([
-        invoices$.forStudent(studentId),
-        payments$.forStudent(studentId),
-        students$.find(studentId)
-    ]);
-
+/** Shared by studentFeeSummary() and guardianFeeSummary() below — the only difference between the two is how `invoices`/`receipts` were fetched. */
+async function summarizeFees(student, invoices, receipts) {
     // Which cycle the student is being billed on, and the one they are in.
     // Outstanding only ever counts invoices that exist, so stating the cycle
     // makes it obvious that nothing ahead has been charged.
@@ -511,6 +507,36 @@ export async function studentFeeSummary(studentId) {
         onTrack: outstanding === 0,
         timeline: buildTimeline(live, receipts)
     };
+}
+
+/** The complete fee position for one student, as the profile page shows it. */
+export async function studentFeeSummary(studentId) {
+    const [invoices, receipts, student] = await Promise.all([
+        invoices$.forStudent(studentId),
+        payments$.forStudent(studentId),
+        students$.find(studentId)
+    ]);
+    return summarizeFees(student, invoices, receipts);
+}
+
+/**
+ * Milestone P2 (Parent/Student Portal). Same computation as
+ * studentFeeSummary(), but sourced from invoices$/payments$'s
+ * guardian-scoped forGuardian() (queries by guardianPhone/guardianEmail
+ * directly on the invoice/payment documents) rather than a
+ * studentId-filtered query — required for firestore.rules to authorize the
+ * query at all (see isGuardianOfRecord()'s own comment in firestore.rules).
+ * `student` is passed in already-loaded (guardianSession.activeChild()),
+ * not re-fetched — the portal never needs a fresh students$ read here.
+ */
+export async function guardianFeeSummary(phone, email, student) {
+    const [allInvoices, allReceipts] = await Promise.all([
+        invoices$.forGuardian(phone, email),
+        payments$.forGuardian(phone, email)
+    ]);
+    const invoices = allInvoices.filter((i) => i.studentId === student.id);
+    const receipts = allReceipts.filter((p) => p.studentId === student.id);
+    return summarizeFees(student, invoices, receipts);
 }
 
 /** Invoices and receipts interleaved, newest first — the payment timeline. */

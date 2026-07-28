@@ -1,3 +1,27 @@
+# Release Notes — NATYAM ERP v2.18.0
+
+**Release:** Milestone P2 — Guardian Read Access to Attendance, Certificates, Fees
+**Date:** 28 July 2026
+**Baseline:** v2.17.6
+**Type:** Feature completion. The Parent/Student Portal's Attendance, Certificates, and Fees pages — previously blocked by a documented, deliberate gap — now work for any guardian sign-in.
+
+## What changed for the academy
+
+A parent or student signed into the portal can now see their child's actual attendance rate, issued certificates, and fee history — not just their batch, timetable, and programmes as before. This is the last piece of the portal originally scoped in Milestone P1.
+
+## For administrators / IT
+
+- **`firestore.rules` must be republished again** — four collections' read rules gained one additional, additive branch each.
+- **New records work immediately** after republishing — attendance marked, a certificate issued, or a fee raised/collected from now on will show up in the portal right away.
+- **Older records need one optional, one-time step** to become visible to guardians: see `docs/migrations/GUARDIAN_FIELDS_BACKFILL.md` for how to run it from the browser console. This is not required for the release to work — it only affects whether history predating today is visible in the portal.
+
+## Quality
+
+- Static analysis clean: no import cycles, all imports resolve, no undefined identifiers.
+- Every new guardian-facing query was deliberately designed to query by `guardianPhone`/`guardianEmail` directly (never by `studentId`) — the lesson learned twice already this week from a Firestore query being denied outright when its filter didn't match what the security rule checks.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.6
 
 **Release:** Patch — Portal Router Authentication Check Fix

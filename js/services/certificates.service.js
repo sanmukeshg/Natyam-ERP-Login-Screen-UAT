@@ -197,6 +197,8 @@ export async function issue({ studentId, templateId, programId = null, citation 
         studentId: student.id,
         studentName: student.name,
         admissionNo: student.admissionNo,
+        guardianPhone: student.guardianPhone || null,
+        guardianEmail: student.guardianEmail || null,
         programId: program?.id || null,
         programName: program?.name || null,
         branchId: student.branchId,
