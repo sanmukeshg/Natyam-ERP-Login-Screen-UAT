@@ -29,11 +29,21 @@ const RECAPTCHA_CONTAINER_ID = 'mobile-otp-recaptcha';
 
 let verifier = null;
 
-/** One shared invisible reCAPTCHA, created lazily against the login screen's fixed container. */
+/**
+ * A fresh invisible reCAPTCHA against the login screen's fixed container,
+ * every call. Not cached across sendCode() calls: an invisible verifier is
+ * consumed by the single signInWithPhoneNumber() attempt it backs, and
+ * reusing the same instance for a retry (wrong number, network blip, or
+ * simply trying again) throws "reCAPTCHA client element has been removed"
+ * on every attempt after the first — confirmed 2026-07-28 against a real
+ * retry sequence. clear() releases the previous widget before replacing it.
+ */
 function recaptcha() {
-    if (!verifier) {
-        verifier = new RecaptchaVerifier(auth, RECAPTCHA_CONTAINER_ID, { size: 'invisible' });
+    if (verifier) {
+        verifier.clear();
+        verifier = null;
     }
+    verifier = new RecaptchaVerifier(auth, RECAPTCHA_CONTAINER_ID, { size: 'invisible' });
     return verifier;
 }
 

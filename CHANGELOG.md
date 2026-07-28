@@ -9,6 +9,27 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.4] — 2026-07-28 — Unified Email/Mobile Login Field
+
+### Changed
+- **The login screen's separate "Email" and "Mobile Number" fields are now one merged "Email or Mobile Number" field.** `login.page.js`'s new `detectMode()` decides live, as the person types, which of the two applies — a value containing `@` is unambiguously email; a value that reduces to `/^\+?\d{8,15}$/` is unambiguously a phone number; anything else (empty or partial) stays in email mode. The Password field, "Login" label, and "Forgot password?" link show only in email mode; the same button becomes "Send OTP" in mobile mode. No change to any provider, `resolveProvisionedUser()`, or `firestore.rules` — purely which of the two already-existing, unchanged flows a single field routes into. See `docs/architecture/AUTHENTICATION_PROVIDERS.md` §5b.
+
+---
+
+## [2.17.3] — 2026-07-28 — Auth Rejection Masking + Mobile OTP Fixes
+
+Direct follow-up to v2.17.2, found while live-testing both a guardian Google sign-in and a staff Mobile OTP sign-in against the republished rules.
+
+### Fixed
+- **Every rejected or failed sign-in masked its own real error with a raw Firestore permission error.** `resolveProvisionedUser()` writes an audit-log entry on every rejection path (archived/inactive/method-not-permitted/not-provisioned) before throwing its real message — but `auditLog`'s create rule requires `isProvisionedActiveUser()`, false by definition for every caller these paths exist to handle. The audit write itself was denied, and that raw error surfaced instead of the intended one — for the not-provisioned case specifically, it also meant `err.code` never reached `'not_provisioned'`, so the guardian portal fallback in `app.js` never ran at all. Fixed with a `safeAuditRow()` wrapper in `auth.service.js`: an audit-log failure is now logged to console, never thrown.
+- **The reCAPTCHA widget broke after the first "Send OTP" attempt.** `mobileOtpProvider.js` cached one invisible `RecaptchaVerifier` for the whole page load, but Firebase's invisible reCAPTCHA is single-use — any retry reused the exhausted widget and failed identically (`reCAPTCHA client element has been removed`) on every attempt after. Fixed: a fresh verifier is created on every `sendCode()` call.
+- **`sessions/{sessionId}`'s write rule crashed for any phone-only (Mobile OTP) session.** It called `myEmail()` unconditionally, which throws for a token with no email claim — meaning no Mobile OTP sign-in, staff or guardian, could ever create its own session record, regardless of account status. Fixed with a new `ownsUserId()` rule helper: an email-based caller still matches by `myEmail()` directly; a phone-based caller is verified by reading the claimed `/users/{id}` doc (a single, already-budget-safe document read, not a query) and checking its `mobile` field against the caller's phone claim.
+
+### Manual steps before this works
+- **`firestore.rules` must be republished again** (fourth time this cycle) — only the `sessions` rule and the new `ownsUserId()` helper changed; every other rule is untouched.
+
+---
+
 ## [2.17.2] — 2026-07-28 — Guardian Sign-In Fix
 
 Direct follow-up after the first real guardian sign-in attempt against live Firebase surfaced a bug the milestone report had flagged as untested: the guardian portal's own lookup query didn't match what `firestore.rules` requires it to prove, so every guardian sign-in (Google, Mobile OTP, or Email/Password) failed with "Missing or insufficient permissions" before ever reaching the portal.

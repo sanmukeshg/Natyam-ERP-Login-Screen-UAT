@@ -1,3 +1,41 @@
+# Release Notes — NATYAM ERP v2.17.4
+
+**Release:** Patch — Unified Email/Mobile Login Field
+**Date:** 28 July 2026
+**Baseline:** v2.17.3
+**Type:** UI/UX change to the login screen only — no provider, backend, or `firestore.rules` change. No manual step, no republish needed.
+
+## What changed for the academy
+
+The login screen now has a single "Email or Mobile Number" field instead of two separate boxes. Type either one — the screen figures out which, and shows the right next step (password, or Send OTP) automatically.
+
+## For administrators / IT
+
+- No manual step needed — this is a client-side-only change.
+- Confirm: typing an email still shows Password/Login/Forgot-password; typing a 10-digit number switches to "Send OTP"; Google sign-in is unaffected.
+
+---
+
+# Release Notes — NATYAM ERP v2.17.3
+
+**Release:** Patch — Auth Rejection Masking + Mobile OTP Fixes
+**Date:** 28 July 2026
+**Baseline:** v2.17.2
+**Type:** Bug fix, found while live-testing guardian Google sign-in and staff Mobile OTP sign-in back to back. Three separate bugs: a masked rejection error, a single-use reCAPTCHA widget being reused, and a `firestore.rules` write rule that crashed for any phone-only session.
+
+## For administrators / IT
+
+- **`firestore.rules` must be republished again** (fourth time this cycle) — only the `sessions` collection's rule changed.
+- Retry both a guardian sign-in and a staff Mobile OTP sign-in after republishing — both should now reach past sign-in cleanly.
+
+## What changed
+
+- A rejected or failed sign-in (wrong account, archived account, or a genuinely unrecognised identity) was showing a raw "Missing or insufficient permissions" instead of its real, specific message — because the code that logs the rejection to the audit log wasn't itself allowed to, and that failure was overriding the real one. Fixed — audit logging can no longer interfere with the actual sign-in outcome.
+- Retrying "Send OTP" (a wrong number, a network blip, or just trying again) broke every attempt after the first with a reCAPTCHA error. Fixed — a fresh verifier is used every time.
+- Signing in via Mobile OTP could never create its own session record, for anyone, regardless of account status — a `firestore.rules` rule was written in a way that assumed every sign-in carries an email, which Mobile OTP never does. Fixed.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.2
 
 **Release:** Patch — Guardian Sign-In Fix

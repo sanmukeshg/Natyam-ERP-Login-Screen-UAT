@@ -205,9 +205,13 @@ permitted, not just created.
 Firebase's `signInWithPhoneNumber` requires full E.164 (a leading `+` and
 country code). Since NATYAM's users are all Indian today, nobody should
 have to type `+91` on every sign-in. `login.page.js`'s `toIndianE164()`
-prepends `+91` to whatever's typed in the Mobile Number field unless it
-already starts with `+` (someone deliberately using a different country
-code). The same default is applied on the *storage* side —
+prepends `+91` to whatever's typed unless it already starts with `+`
+(someone deliberately using a different country code). Since v2.17.4 the
+login screen has one merged "Email or Mobile Number" field rather than a
+separate dedicated Mobile Number input (see §5b below) — `toIndianE164()`
+is only ever applied to that field's value once it's been detected as a
+phone number, not to whatever's typed in general. The same `+91` default
+is applied on the *storage* side —
 `users.repository.firestore.js`'s `normalisePhone()` — so a number an
 Administrator types into Settings → Users without a `+91` prefix
 normalises to the exact same canonical form Firebase hands back at
@@ -215,6 +219,25 @@ sign-in time. Getting these two out of sync would silently break Mobile
 OTP for that account (a stored bare `9618007074` would never match a
 verified `+919618007074`), so both call the same rule rather than two
 independently-written ones that could drift.
+
+## 5b. One Merged Email/Mobile Field (v2.17.4)
+
+The login screen no longer has two separate identifier inputs (an Email
+field for Email & Password, and a dedicated Mobile Number field for
+Mobile OTP) — it has one, labelled "Email or Mobile Number". `login.page.js`'s
+`detectMode(value)` decides, live as the person types, which of the two
+methods applies: a value containing `@` is unambiguously an email; a value
+that reduces (after stripping spaces/dashes) to `/^\+?\d{8,15}$/` is
+unambiguously a phone number; anything else (empty, or a partial value
+like `"98"` or `"sanmuk"`) stays in email mode, the safer default. The
+Password field, "Login" button label, and "Forgot password?" link are
+shown only in email mode; in mobile mode they hide and the same button
+becomes "Send OTP", calling the exact same `sendMobileCode()`/
+`toIndianE164()` path as before. Nothing about the provider layer,
+`resolveProvisionedUser()`, or `firestore.rules` changed for this — it is
+a login-screen-only change to which of two already-existing flows a
+single field routes into. Google's button is untouched, a third and
+independent option below.
 
 ## 6. Roadmap
 

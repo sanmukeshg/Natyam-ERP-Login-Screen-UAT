@@ -62,6 +62,28 @@ async function writeAuditRow(entityId, action, detail, actor = null) {
     await recordAuditEntry('Auth', action, entityId, detail, actor);
 }
 
+/**
+ * Audit logging is a side effect, never the authorization decision itself.
+ * `auditLog`'s own create rule requires isProvisionedActiveUser() — which
+ * is false for exactly the callers resolveProvisionedUser()'s rejection
+ * branches run for (an archived/inactive/unrecognised identity), and is
+ * *always* false for a phone-only (Mobile OTP) session regardless of
+ * account status, since that token carries no email claim at all.
+ * Unwrapped, a write here throws before the real rejection message (or,
+ * for the not_provisioned case, the err.code the guardian portal fallback
+ * in app.js depends on) is ever set — confirmed 2026-07-28 against a real
+ * guardian sign-in and a real Mobile OTP staff sign-in, both masked by
+ * this exact "Missing or insufficient permissions" instead of their real
+ * outcome. Failure here is logged, never thrown.
+ */
+async function safeAuditRow(...args) {
+    try {
+        await writeAuditRow(...args);
+    } catch (err) {
+        console.error('[auth] audit log write failed (non-fatal)', err);
+    }
+}
+
 /** The provider id an identity came from — our own providers set `.provider`; a restored Firebase User is asked directly. */
 function providerIdOf(identity) {
     if (identity.provider) return identity.provider;
@@ -223,12 +245,12 @@ export async function resolveProvisionedUser(identity) {
 
     if (existing) {
         if (existing.deletedAt) {
-            await writeAuditRow(existing.id, 'login_failed', { reason: 'archived' }, existing);
+            await safeAuditRow(existing.id, 'login_failed', { reason: 'archived' }, existing);
             bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'archived' });
             throw new Error('Account unavailable. This account has been archived.');
         }
         if (existing.status !== 'active') {
-            await writeAuditRow(existing.id, 'login_failed', { reason: 'inactive' }, existing);
+            await safeAuditRow(existing.id, 'login_failed', { reason: 'inactive' }, existing);
             bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'inactive' });
             throw new Error('Account disabled. Ask an administrator to reactivate your account.');
         }
@@ -240,12 +262,12 @@ export async function resolveProvisionedUser(identity) {
         // method, never assumes one), not a role check — a role decides
         // what someone may do once in, not how they may get in.
         if (!authMethodsOf(existing).includes(providerId)) {
-            await writeAuditRow(existing.id, 'login_failed', { reason: 'method_not_permitted', method: providerId }, existing);
+            await safeAuditRow(existing.id, 'login_failed', { reason: 'method_not_permitted', method: providerId }, existing);
             bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'method_not_permitted' });
             throw new Error('This authentication method is not enabled for your account. Please use one of your permitted sign-in methods or contact your Administrator.');
         }
 
-        await writeAuditRow(existing.id, 'login_succeeded', null, existing);
+        await safeAuditRow(existing.id, 'login_succeeded', null, existing);
         bus.emit(EVENTS.LOGIN_SUCCEEDED, { userId: existing.id });
         await ensureSessionRecord(existing, providerId);
         return existing;
@@ -265,14 +287,14 @@ export async function resolveProvisionedUser(identity) {
             // one field that decides anything, for a bootstrap account same
             // as any other.
             const admin = await users$.bootstrapAdministrator({ name, email, authMethods: [providerId] });
-            await writeAuditRow(admin.id, 'login_succeeded', { bootstrap: true }, admin);
+            await safeAuditRow(admin.id, 'login_succeeded', { bootstrap: true }, admin);
             bus.emit(EVENTS.LOGIN_SUCCEEDED, { userId: admin.id, bootstrap: true });
             await ensureSessionRecord(admin, providerId);
             return admin;
         } catch { /* falls through to the standard rejection below */ }
     }
 
-    await writeAuditRow(email || identity.phoneNumber, 'login_failed', { email, reason: 'not_provisioned' });
+    await safeAuditRow(email || identity.phoneNumber, 'login_failed', { email, reason: 'not_provisioned' });
     bus.emit(EVENTS.LOGIN_FAILED, { email, reason: 'not_provisioned' });
     // Marked (not just message-matched) so app.js can safely try the
     // Parent/Student Portal's guardian fallback (Milestone P1) only for

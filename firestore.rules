@@ -190,6 +190,25 @@ service cloud.firestore {
       );
     }
 
+    // A staff `/users` doc is always keyed by email, even for an account
+    // that also signs in via Mobile OTP — a phone-only session token has no
+    // email claim at all, so myEmail() can't identify "my own doc" the way
+    // it does for Google/Password. One extra get() (a single document, not
+    // a query — sessions/{id} is only ever read/written by its own id, never
+    // listed, so the 10-get query-wide budget doesn't apply here) confirms
+    // the userId being claimed is actually this caller's own account by
+    // checking its mobile field against the caller's phone claim. Confirmed
+    // 2026-07-28: sessions/{sessionId}'s unconditional myEmail() call was
+    // throwing (denying) every Mobile OTP sign-in at session-record
+    // creation, for staff and guardians alike, immediately after fixing the
+    // audit-log write that was masking it.
+    function ownsUserId(userId) {
+      return (hasEmailClaim() && userId == myEmail())
+        || (callerPhone() != null
+            && exists(/databases/$(database)/documents/users/$(userId))
+            && get(/databases/$(database)/documents/users/$(userId)).data.mobile == callerPhone());
+    }
+
     // REMOVED (2026-07-27): a per-document get() on a different /students/{id}
     // path for every distinct studentId is not viable on attendance/
     // certificates/invoices/payments — Firestore caps get()/exists() calls at
@@ -246,9 +265,9 @@ service cloud.firestore {
     // deleted — ended sessions are a soft-delete update (endedAt/reason),
     // the same audit-trail convention every other module uses.
     match /sessions/{sessionId} {
-      allow create: if signedIn() && request.resource.data.userId == myEmail();
-      allow read: if signedIn() && (resource.data.userId == myEmail() || isAdministrator());
-      allow update: if signedIn() && resource.data.userId == myEmail();
+      allow create: if signedIn() && ownsUserId(request.resource.data.userId);
+      allow read: if signedIn() && (ownsUserId(resource.data.userId) || isAdministrator());
+      allow update: if signedIn() && ownsUserId(resource.data.userId);
       allow delete: if false;
     }
 

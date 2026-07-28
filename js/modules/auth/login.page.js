@@ -120,6 +120,14 @@ export function renderLogin(container, { initialError = null } = {}) {
     // machine needed for a two-step form.
     let confirmation = null;
 
+    // Which of the two identity-form outcomes the single identifier field
+    // currently means — decided live from what's typed (see detectMode()
+    // below), not a separate field or a separate form. 'email' is the
+    // default: it's the primary method, and it means the Password field
+    // doesn't flicker away while someone is still mid-way through typing
+    // their email address.
+    let mode = 'email';
+
     render(container, html`
         <div class="auth-screen">
             <div class="auth-card card">
@@ -137,18 +145,18 @@ export function renderLogin(container, { initialError = null } = {}) {
 
                     <div data-role="banner">${initialError ? errorBanner(initialError) : ''}</div>
 
-                    <form data-role="password-form">
+                    <form data-role="identity-form">
                         <div class="field">
-                            <label class="field-label" for="f-email">Email</label>
-                            <input class="input" type="email" id="f-email" name="email"
-                                   placeholder="you@natyam.example" autocomplete="username" required>
+                            <label class="field-label" for="f-identifier">Email or Mobile Number</label>
+                            <input class="input" type="text" id="f-identifier" name="email"
+                                   placeholder="you@natyam.example or 98765 43210" autocomplete="username" required>
                         </div>
-                        <div class="field">
+                        <div class="field" data-role="password-field">
                             <label class="field-label" for="f-password">Password</label>
                             <input class="input" type="password" id="f-password" name="password"
                                    placeholder="••••••••" autocomplete="current-password" required>
                         </div>
-                        <button class="btn btn-primary btn-block" type="submit" data-role="password-btn">
+                        <button class="btn btn-primary btn-block" type="submit" data-role="primary-btn">
                             Login
                         </button>
                         <button class="btn-link" type="button" data-role="forgot-btn">Forgot password?</button>
@@ -158,16 +166,6 @@ export function renderLogin(container, { initialError = null } = {}) {
                         ${raw(GOOGLE_G_ICON)}
                         <span>Continue with Google</span>
                     </button>
-
-                    <div data-role="otp-request">
-                        <div class="field">
-                            <label class="field-label" for="f-mobile">Mobile Number</label>
-                            <input class="input" type="tel" id="f-mobile" placeholder="98765 43210" autocomplete="tel">
-                        </div>
-                        <button class="btn btn-secondary btn-block" type="button" data-role="send-otp-btn">
-                            Send OTP
-                        </button>
-                    </div>
 
                     <div data-role="otp-verify" hidden>
                         <div class="field">
@@ -189,34 +187,79 @@ export function renderLogin(container, { initialError = null } = {}) {
 
     const banner = container.querySelector('[data-role="banner"]');
     const googleButton = container.querySelector('[data-role="google-btn"]');
-    const passwordForm = container.querySelector('[data-role="password-form"]');
-    const passwordButton = container.querySelector('[data-role="password-btn"]');
-    const otpRequest = container.querySelector('[data-role="otp-request"]');
+    const identityForm = container.querySelector('[data-role="identity-form"]');
+    const identifierInput = container.querySelector('#f-identifier');
+    const passwordField = container.querySelector('[data-role="password-field"]');
+    const passwordInput = container.querySelector('#f-password');
+    const primaryButton = container.querySelector('[data-role="primary-btn"]');
+    const forgotButton = container.querySelector('[data-role="forgot-btn"]');
     const otpVerify = container.querySelector('[data-role="otp-verify"]');
-    const sendOtpButton = container.querySelector('[data-role="send-otp-btn"]');
     const verifyOtpButton = container.querySelector('[data-role="verify-otp-btn"]');
+
+    /* --------------------------------------------------------- MODE DETECTION */
+
+    /**
+     * A phone number never contains "@", so the two are unambiguous once
+     * enough is typed. Anything that isn't clearly one or the other yet
+     * (empty, or a partial value like "98" or "sanmuk") stays in email
+     * mode — the safer default while someone is still typing.
+     */
+    function detectMode(value) {
+        const v = value.trim();
+        if (!v || v.includes('@')) return 'email';
+        const digits = v.replace(/[\s-]/g, '');
+        return /^\+?\d{8,15}$/.test(digits) ? 'mobile' : 'email';
+    }
+
+    function applyMode(next) {
+        if (next === mode) return;
+        mode = next;
+        passwordField.hidden = mode === 'mobile';
+        passwordInput.required = mode === 'email';
+        forgotButton.hidden = mode === 'mobile';
+        primaryButton.textContent = mode === 'mobile' ? 'Send OTP' : 'Login';
+    }
+
+    on(container, 'input', '#f-identifier', () => applyMode(detectMode(identifierInput.value)));
 
     /* ------------------------------------------------------ EMAIL & PASSWORD */
 
-    on(container, 'submit', '[data-role="password-form"]', async (event) => {
+    on(container, 'submit', '[data-role="identity-form"]', async (event) => {
         event.preventDefault();
         render(banner, '');
-        passwordButton.setAttribute('data-loading', 'true');
-        passwordButton.disabled = true;
+        primaryButton.setAttribute('data-loading', 'true');
+        primaryButton.disabled = true;
+
+        if (mode === 'mobile') {
+            try {
+                const phoneNumber = toIndianE164(identifierInput.value.trim());
+                confirmation = await sendMobileCode(phoneNumber);
+                identityForm.hidden = true;
+                otpVerify.hidden = false;
+                container.querySelector('#f-otp-code').focus();
+            } catch (err) {
+                console.error('[mobile-otp] sendCode failed', err?.code, err?.message, err);
+                render(banner, errorBanner(friendlyAuthError(err, 'Could not send a code. Check the number and try again.')));
+            } finally {
+                primaryButton.removeAttribute('data-loading');
+                primaryButton.disabled = false;
+            }
+            return;
+        }
 
         try {
-            const { email, password } = formData(passwordForm);
+            const { email, password } = formData(identityForm);
             await signIn('password', { email, password });
             // Left loading: app.js's onAuthStateChanged listener takes it from here.
         } catch (err) {
             render(banner, errorBanner(friendlyAuthError(err, 'Could not sign in. Check your email and password.')));
-            passwordButton.removeAttribute('data-loading');
-            passwordButton.disabled = false;
+            primaryButton.removeAttribute('data-loading');
+            primaryButton.disabled = false;
         }
     });
 
     on(container, 'click', '[data-role="forgot-btn"]', async () => {
-        const email = container.querySelector('#f-email').value.trim();
+        const email = identifierInput.value.trim();
         if (!email) {
             render(banner, errorBanner('Enter your email above first, then click "Forgot password?" again.'));
             return;
@@ -256,27 +299,7 @@ export function renderLogin(container, { initialError = null } = {}) {
         }
     });
 
-    /* ---------------------------------------------------------- MOBILE OTP */
-
-    on(container, 'click', '[data-role="send-otp-btn"]', async () => {
-        render(banner, '');
-        const phoneNumber = toIndianE164(container.querySelector('#f-mobile').value.trim());
-        sendOtpButton.setAttribute('data-loading', 'true');
-        sendOtpButton.disabled = true;
-
-        try {
-            confirmation = await sendMobileCode(phoneNumber);
-            otpRequest.hidden = true;
-            otpVerify.hidden = false;
-            container.querySelector('#f-otp-code').focus();
-        } catch (err) {
-            console.error('[mobile-otp] sendCode failed', err?.code, err?.message, err);
-            render(banner, errorBanner(friendlyAuthError(err, 'Could not send a code. Check the number and try again.')));
-        } finally {
-            sendOtpButton.removeAttribute('data-loading');
-            sendOtpButton.disabled = false;
-        }
-    });
+    /* ------------------------------------------------------- MOBILE OTP VERIFY */
 
     on(container, 'click', '[data-role="verify-otp-btn"]', async () => {
         render(banner, '');
@@ -299,7 +322,10 @@ export function renderLogin(container, { initialError = null } = {}) {
         render(banner, '');
         confirmation = null;
         otpVerify.hidden = true;
-        otpRequest.hidden = false;
+        identityForm.hidden = false;
         container.querySelector('#f-otp-code').value = '';
+        identifierInput.value = '';
+        applyMode('email');
+        identifierInput.focus();
     });
 }
