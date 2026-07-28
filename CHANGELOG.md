@@ -9,6 +9,18 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.5] — 2026-07-28 — Mobile OTP Identity Lookup Fix
+
+Direct follow-up to v2.17.3, found while live-testing a real guardian Mobile OTP sign-in end to end (OTP received and entered correctly, then rejected).
+
+### Fixed
+- **Every Mobile OTP sign-in — staff or guardian — failed at the very first lookup**, before ever reaching `resolveProvisionedUser()`'s own status/method checks or the guardian portal fallback. `users$.findByMobile()` (the first thing any phone-only sign-in resolves through) is a Firestore *query* (`where('mobile','==',...)`), not a `get()` by the doc's own id — a phone-only caller doesn't know their own email yet, so `isOwnDoc(userId)` can never match, and `isAdministrator()` needs an email claim too. Firestore only permits a query when its own filter can prove the rule holds for every possible match, and neither existing branch could be proven from a `mobile==X` filter alone — the whole query was denied outright. Fixed by adding a third branch to `/users/{userId}`'s read rule: a phone-authenticated caller may read a user doc whose `mobile` field matches their own verified phone claim — safe, since the query is only ever run with the caller's own phone number, so it can only ever match the one document that's genuinely theirs.
+
+### Manual steps before this works
+- **`firestore.rules` must be republished again** — only the `/users/{userId}` read rule changed.
+
+---
+
 ## [2.17.4] — 2026-07-28 — Unified Email/Mobile Login Field
 
 ### Changed

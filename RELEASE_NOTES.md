@@ -1,3 +1,21 @@
+# Release Notes — NATYAM ERP v2.17.5
+
+**Release:** Patch — Mobile OTP Identity Lookup Fix
+**Date:** 28 July 2026
+**Baseline:** v2.17.4
+**Type:** Bug fix, found while live-testing a real guardian Mobile OTP sign-in — OTP received and entered correctly, then rejected with "Missing or insufficient permissions."
+
+## For administrators / IT
+
+- **`firestore.rules` must be republished again** — only the `/users/{userId}` read rule changed.
+- Retry the guardian Mobile OTP sign-in (and staff Mobile OTP, while you're at it) after republishing.
+
+## What changed
+
+- Signing in with a mobile number (OTP) failed immediately after entering the correct code — for staff and guardians alike. The very first step of resolving who's signing in couldn't run under the previous rules at all. Fixed.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.4
 
 **Release:** Patch — Unified Email/Mobile Login Field

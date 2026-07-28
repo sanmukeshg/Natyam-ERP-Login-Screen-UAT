@@ -225,8 +225,25 @@ service cloud.firestore {
 
     match /users/{userId} {
       // A person may always read their own record (to resolve their own
-      // role/status on sign-in); an Administrator may read anyone's.
-      allow read: if isOwnDoc(userId) || isAdministrator();
+      // role/status on sign-in); an Administrator may read anyone's. The
+      // third branch is what makes Mobile OTP resolvable at all:
+      // users$.findByMobile() (auth.service.js's resolveProvisionedUser(),
+      // the very first read on every Mobile OTP sign-in, staff or
+      // guardian) is a QUERY (where('mobile','==',...)), not a get() by
+      // this doc's own id — a phone-only caller doesn't know their own
+      // email yet, so isOwnDoc(userId) can never match, and isAdministrator()
+      // requires an email claim too. Firestore only permits a query when
+      // its own where() clause can prove the rule holds for every possible
+      // match; since the query filters on the exact same `mobile` field
+      // this branch compares, and findByMobile() is only ever called with
+      // the caller's own just-verified phone number, this is safe — it can
+      // only ever match the one document that is genuinely theirs.
+      // Confirmed 2026-07-28: without this, every Mobile OTP sign-in
+      // (staff or guardian) failed at this very first lookup, before ever
+      // reaching resolveProvisionedUser()'s own status/method checks or
+      // the guardian portal fallback.
+      allow read: if isOwnDoc(userId) || isAdministrator()
+        || (callerPhone() != null && resource.data.mobile == callerPhone());
 
       // Normal provisioning: only an existing Administrator may create a
       // user record. One-time exception: while `meta/bootstrapped` does
