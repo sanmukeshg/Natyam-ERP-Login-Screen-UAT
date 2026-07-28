@@ -43,8 +43,22 @@ class Router {
      * @param {Function} [options.revalidate]  async () => boolean, re-checked
      *   on every navigation. Defaults to the staff users-doc live-status
      *   check so the existing `router` singleton below is unchanged.
+     * @param {Function} [options.isAuthenticated]  () => boolean, checked at
+     *   the top of every navigation. Defaults to the shared staff `session`
+     *   singleton — the same object `revalidate` was already made pluggable
+     *   for, but this check itself was missed when the Parent/Student Portal
+     *   (Milestone P1) added a second Router instance: a guardian session
+     *   lives entirely in `guardianSession` (js/services/portal/
+     *   guardianAuth.service.js), never in this staff-only `session` — so
+     *   `session.isAuthenticated()` is permanently false for a guardian,
+     *   and every single portal navigation, including the very first one
+     *   `enterPortal()` triggers, was silently treated as "not signed in,"
+     *   signing the guardian back out and reloading straight to the login
+     *   screen. Confirmed 2026-07-28 against a real guardian sign-in that
+     *   got all the way through resolveGuardianIdentity() and enterPortal()
+     *   only to bounce straight back.
      */
-    constructor({ revalidate = defaultRevalidate } = {}) {
+    constructor({ revalidate = defaultRevalidate, isAuthenticated = () => session.isAuthenticated() } = {}) {
         this.routes = [];
         this.viewport = null;
         this.current = null;
@@ -54,6 +68,7 @@ class Router {
         this.returningToList = false;
         this.notFound = null;
         this.revalidate = revalidate;
+        this.isAuthenticated = isAuthenticated;
     }
 
     /**
@@ -116,7 +131,7 @@ class Router {
         // it immediately the moment the person tries to go anywhere.
         // Reloading is what actually gets them back to the login screen —
         // see js/app.js's own use of the same pattern.
-        if (!session.isAuthenticated()) {
+        if (!this.isAuthenticated()) {
             await expireSession();
             location.reload();
             return;

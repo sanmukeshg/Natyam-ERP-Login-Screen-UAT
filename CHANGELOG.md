@@ -9,6 +9,18 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.17.6] — 2026-07-28 — Portal Router Authentication Check Fix
+
+Direct follow-up to v2.17.5, found while live-testing a guardian sign-in that now got all the way past identity resolution — and then bounced straight back to the login screen.
+
+### Fixed
+- **Every guardian navigation, including the very first one, was silently treated as "not signed in."** `js/core/router.js`'s `Router.resolve()` checks authentication at the top of every navigation — but only its *second* check (`revalidate`) was ever made pluggable when Milestone P1 added a second `Router` instance for the portal. The *first* check, `session.isAuthenticated()`, stayed hard-wired to the shared staff `session` singleton. A guardian's identity lives entirely in `guardianSession` (a separate object) — `session.user` is never set for one — so `session.isAuthenticated()` was permanently `false` for every guardian, and `enterPortal()`'s very first navigation immediately signed them back out and reloaded to the login screen. This affected every guardian sign-in method identically (Google, Mobile OTP, Email & Password) and every fix made earlier tonight (the query mismatch, the audit-log masking, the `/users` phone lookup) — none of them could have been observed working end-to-end until this one was also fixed. Fixed by making the initial authentication check pluggable too (`isAuthenticated`, defaulting to the exact existing `session.isAuthenticated()` check so the staff `router` singleton is unchanged), with `enterPortal()` supplying `guardianSession.isAuthenticated()` for the portal's own `Router` instance.
+
+### Manual steps before this works
+- No `firestore.rules` change, no republish — this is a pure client-side JavaScript fix.
+
+---
+
 ## [2.17.5] — 2026-07-28 — Mobile OTP Identity Lookup Fix
 
 Direct follow-up to v2.17.3, found while live-testing a real guardian Mobile OTP sign-in end to end (OTP received and entered correctly, then rejected).

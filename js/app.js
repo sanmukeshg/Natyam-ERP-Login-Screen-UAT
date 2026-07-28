@@ -206,7 +206,10 @@ async function enterApp() {
  */
 async function enterPortal() {
     const root = document.querySelector('#app');
-    const portalRouter = new Router({ revalidate: () => guardianSession.stillValid() });
+    const portalRouter = new Router({
+        isAuthenticated: () => guardianSession.isAuthenticated(),
+        revalidate: () => guardianSession.stillValid()
+    });
     const shell = new PortalShell(root, { router: portalRouter });
     const viewport = shell.mount();
 

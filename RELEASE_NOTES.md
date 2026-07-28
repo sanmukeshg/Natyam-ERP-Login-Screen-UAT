@@ -1,3 +1,21 @@
+# Release Notes — NATYAM ERP v2.17.6
+
+**Release:** Patch — Portal Router Authentication Check Fix
+**Date:** 28 July 2026
+**Baseline:** v2.17.5
+**Type:** Bug fix, found while live-testing a guardian sign-in that finally got past identity resolution — and then bounced straight back to the login screen. Pure client-side JavaScript — no `firestore.rules` change, no republish needed.
+
+## For administrators / IT
+
+- No manual step needed.
+- Retry a guardian sign-in (any method) — it should now actually land on the portal instead of flashing and returning to the login screen.
+
+## What changed
+
+- Every guardian navigation was being silently treated as "not signed in," because the router's authentication check was still hard-wired to the staff sign-in system rather than the guardian one. This is why every guardian sign-in attempt tonight — regardless of which fix had already landed — still bounced back to the login screen. Fixed.
+
+---
+
 # Release Notes — NATYAM ERP v2.17.5
 
 **Release:** Patch — Mobile OTP Identity Lookup Fix
