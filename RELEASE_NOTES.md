@@ -1,3 +1,37 @@
+# Release Notes — NATYAM ERP v2.23.0
+
+**Release:** IAM — Owner role upgrade
+**Date:** 30 July 2026
+**Baseline:** v2.22.0
+**Type:** Business-rule change (intentional), plus three bugs found while verifying it, refined once after review.
+
+## What changed for the academy
+
+- **Surekha's account can now do her whole job without switching to the Administrator login.** The Owner & Accountant role went from 13 permissions to 33 of the system's 39: students (including delete), admissions, attendance and registers, batches and timetable, curriculum, programmes, certificates, staff, fee structure, fee collection, refunds and waivers, finance, reports and exports, calendar, notifications and announcements, documents, academy settings, and full user management — creating users, editing them, disabling them, and assigning the Teacher & Reception or Viewer roles.
+- **Six things stay with the Administrator**, and they are all system-level rather than academy-level: Firebase/API/environment/application configuration and system constants; role definitions and the permission matrix; security, password, MFA and session policies; database maintenance, migrations and developer tools; restoring or erasing the database; and deleting audit history.
+- **The Owner can read the whole audit log and can never delete from it.** That is deliberate — an audit trail only means something if the person with the most authority cannot edit it.
+- **One limit worth knowing about, and it is narrower than it might sound:** the Owner cannot create an Administrator, promote anyone to Administrator, or change an existing Administrator's account. That is the *only* restriction — she can create, edit and disable as many Owner, Teacher & Reception or Viewer accounts as the academy needs, no differently from an Administrator. Confirmed by review and now covered by an automated check: the restriction is tied to the account being touched, never to who is doing the touching, so it can never accidentally widen into "the Owner can't manage other Owner accounts."
+- **Settings is now explicitly two things: Business Settings and System Settings.** Business Settings — institute details, branches, fee plans, curriculum and the rest of what already lived under the Settings tab — is Owner and Administrator alike, exactly as before. System Settings — Firebase, API and environment configuration — was already Administrator-only; it's now named and documented as its own thing rather than folded into the same sentence as Business Settings, so it's unambiguous which is which as the application grows. No screen changes today.
+- **Application maintenance — version updates, database migrations, deployment operations, system upgrades — is confirmed Administrator-only**, spelled out explicitly rather than left to be inferred from "database maintenance." No screen exercises this today; it is a standing reservation for when one exists.
+- **Nothing changed for Teacher & Reception or Viewer.** Future teachers get exactly the role they would have got last week.
+- Settings → Roles now actually works. It has been showing a dash in every single cell — for every role, including Administrator — because of a name-vs-value mix-up in the code behind it. It now shows the real matrix, with reserved permissions badged "system", and its subtitle states the Business/System Settings split plainly.
+
+## For administrators / IT
+
+- **`firestore.rules` must be redeployed with this release.** This is the half of the change that matters: the rules file is the real boundary, and an upgraded role in the app with an un-upgraded rules file means "Missing or insufficient permissions" errors instead of working screens. Paste the updated file into Firebase Console → Firestore Database → Rules, or `firebase deploy --only firestore:rules`.
+- **No data migration.** A user document stores a role *key* (`owner_accountant`), never a list of permissions, so the existing Owner account picks up the new grant the next time she signs in. Nothing to run, nothing to backfill.
+- The `backup.manage` permission was split into `backup.create`, `data.export` and `data.restore`. Old backups and any stored role matrix naming the retired string still resolve correctly.
+- The rules file gained a `settings` collection block. The key/value settings store (institute details, document-numbering sequences) had just moved to Firestore with no rule covering it, which the file's catch-all denies — this would have broken reads of the school's own name for everyone, unrelated to roles.
+- To change the model later: add a capability to `CAPABILITIES` and the Owner gets it automatically; add it to `ADMINISTRATOR_ONLY_CAPABILITIES` as well to reserve it. `docs/architecture/IAM_ROLE_MODEL.md` documents this.
+
+## Quality
+
+- 20 automated assertions over the resolved role matrix, all passing: the Administrator/Owner difference is exactly the reserved list; all 33 granted permissions present and all 6 reserved ones absent for the Owner; Teacher & Reception and Viewer byte-for-byte unchanged; every one of the 29 capability strings used anywhere in `js/` is a defined capability (this is what catches a rename left half-finished); every navigation entry reachable by the Owner; the retired `backup.manage` string still expands correctly; the Business/System Settings split resolves as intended; and — new this round — a static check on both `settings.service.js` and `firestore.rules` confirming the escalation guard tests the *account's* role, not the actor's, in every one of `createUser()`/`updateUser()`/`deactivateUser()` and the `/users` `create`/`update` rules.
+- `firestore.rules` reviewed line by line against the capability table: every remaining `isAdministrator()` was confirmed to be a reserved-capability gate or a restore-only `delete`.
+- Not verified interactively: signing in as the Owner requires real Firebase credentials, which this session had no way to use. Recommended before sign-off — sign in as Surekha and confirm Settings → Users (add/edit/remove **another Owner account specifically**, not just her own), Settings → Data (backup present, Restore and Erase absent), Settings → Audit log (readable), and marking a register.
+
+---
+
 # Release Notes — NATYAM ERP v2.22.0
 
 **Release:** Bug fixes from "New Bugs 2.21.0"

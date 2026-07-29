@@ -50,7 +50,12 @@ Single-field equality (`branchId`, `status`, `appliedOn`, `applicationNo`) needs
 
 ## 6. Security Rules
 
-See `firestore.rules`, `match /admissions/{admissionId}` block. Summary:
+See `firestore.rules`, `match /admissions/{admissionId}` block. Summary **as of
+this milestone**, and two later changes have moved it: Hard delete was opened to
+Administrator on 2026-07-27 so restore-from-backup could work, and the Owner role
+upgrade in v2.23.0 granted Owner & Accountant `admission.edit`, so it now holds
+Create as well as Update. See `docs/architecture/IAM_ROLE_MODEL.md` for the
+current model.
 
 | Operation | Who |
 |---|---|

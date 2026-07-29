@@ -31,7 +31,7 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatMoney, formatNumber } from '../../utils/money.js';
 import { formatDate, formatDateTime, relativeTime, localDate } from '../../utils/date.js';
-import { APP, STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY } from '../../config/app.config.js';
+import { APP, STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY, SETTINGS_GROUPS } from '../../config/app.config.js';
 
 import {
     institute, updateInstitute, listBranches, createBranch, updateBranch, closeBranch,
@@ -900,6 +900,13 @@ export default class SettingsPage extends Page {
     async usersPanel() {
         const users = await listUsers();
 
+        // An Administrator account may only be edited or deactivated by
+        // someone holding role.manage — Administrator alone. The Owner
+        // manages every other account; showing her buttons that the service
+        // layer and firestore.rules would both refuse is worse than not
+        // showing them.
+        const mayTouch = (user) => user.role !== 'administrator' || session.can('role.manage');
+
         return html`
             <div class="alert alert-info">
                 <div class="alert-title">Roles are enforced two ways</div>
@@ -916,7 +923,7 @@ export default class SettingsPage extends Page {
                 <div class="card-header">
                     <h2 class="card-title">Users</h2>
                     <p class="card-subtitle">${formatNumber(users.length)} people can use this system.</p>
-                    ${session.can('settings.edit') ? html`
+                    ${session.can('user.create') ? html`
                         <div class="card-actions">
                             <button class="btn btn-sm btn-primary" data-do="new-user">Add user</button>
                         </div>
@@ -946,20 +953,21 @@ export default class SettingsPage extends Page {
                                     <td><span class="badge ${user.status === 'active' ? 'badge-success' : 'badge-neutral'}">
                                         ${user.status || 'active'}</span></td>
                                     <td class="text-right">
-                                        ${session.can('settings.edit') ? html`
-                                            <div class="row row-tight">
+                                        <div class="row row-tight">
+                                            ${session.can('user.edit') && mayTouch(user) ? html`
                                                 <button class="btn btn-sm btn-ghost"
                                                         data-do="edit-user" data-id="${user.id}">Edit</button>
-                                                ${user.id === session.actorId() ? html`
-                                                    <button class="btn btn-sm btn-ghost"
-                                                            data-do="set-own-password">Set a password</button>
-                                                ` : ''}
-                                                ${user.status === 'active' && user.id !== session.actorId() ? html`
-                                                    <button class="btn btn-sm btn-danger-quiet"
-                                                            data-do="deactivate-user" data-id="${user.id}">Remove</button>
-                                                ` : ''}
-                                            </div>
-                                        ` : ''}
+                                            ` : ''}
+                                            ${user.id === session.actorId() && session.can('user.edit') ? html`
+                                                <button class="btn btn-sm btn-ghost"
+                                                        data-do="set-own-password">Set a password</button>
+                                            ` : ''}
+                                            ${session.can('user.deactivate') && mayTouch(user)
+                                                && user.status === 'active' && user.id !== session.actorId() ? html`
+                                                <button class="btn btn-sm btn-danger-quiet"
+                                                        data-do="deactivate-user" data-id="${user.id}">Remove</button>
+                                            ` : ''}
+                                        </div>
                                     </td>
                                 </tr>
                             `)}
@@ -985,9 +993,14 @@ export default class SettingsPage extends Page {
                 {
                     name: 'role', label: 'Role', type: 'select', required: true, width: 'half',
                     value: user?.role || 'teacher_reception',
-                    options: Object.entries(roleTable()).map(([value, role]) => ({
-                        value, label: role.label, note: role.description
-                    }))
+                    // Administrator is only offered to someone who may grant
+                    // it (role.manage — see requireRoleAssignable() in
+                    // settings.service.js). Offering the Owner a role the
+                    // service will refuse on submit is how you produce a
+                    // "permission denied" in the middle of ordinary work.
+                    options: Object.entries(roleTable())
+                        .filter(([value]) => value !== 'administrator' || session.can('role.manage'))
+                        .map(([value, role]) => ({ value, label: role.label, note: role.description }))
                 },
                 {
                     name: 'branchId', label: 'Branch', type: 'select', width: 'half', value: user?.branchId,
@@ -1073,7 +1086,12 @@ export default class SettingsPage extends Page {
                     <h2 class="card-title">What each role can do</h2>
                     <p class="card-subtitle">
                         Capabilities are declared in the application. They are shown here so it is clear
-                        what a role means before someone is given it.
+                        what a role means before someone is given it. Changing a role definition is
+                        Administrator-only and is not done from this screen.
+                        <strong>${SETTINGS_GROUPS.business.label}</strong> (this tab, branches, fee plans,
+                        curriculum, master data, announcements) is Owner and Administrator alike;
+                        <strong>${SETTINGS_GROUPS.system.label}</strong> (Firebase, API and environment
+                        configuration) is Administrator-only, marked "system" below.
                     </p>
                 </div>
                 <div class="card-body card-body-flush">
@@ -1094,6 +1112,10 @@ export default class SettingsPage extends Page {
                                     <tr>
                                         <th scope="row">
                                             <span class="type-caption">${capability.label}</span>
+                                            ${capability.administratorOnly ? html`
+                                                <span class="badge badge-neutral badge-sm"
+                                                      title="Reserved to Administrator — the Owner does not hold this">system</span>
+                                            ` : ''}
                                         </th>
                                         ${matrix.roles.map((role) => html`
                                             <td class="text-center">
@@ -1356,7 +1378,9 @@ export default class SettingsPage extends Page {
                     There is no server holding a copy. A backup file is the only thing standing between
                     a cleared browser and losing everything.
                 </p>
-                <button class="btn btn-sm btn-primary" data-do="backup">Download a backup now</button>
+                ${session.can('backup.create') ? html`
+                    <button class="btn btn-sm btn-primary" data-do="backup">Download a backup now</button>
+                ` : ''}
             </div>
 
             <div class="grid grid-2">
@@ -1386,12 +1410,16 @@ export default class SettingsPage extends Page {
                     </div>
                     <div class="card-body">
                         <div class="stack stack-sm">
-                            <button class="btn btn-secondary" data-do="import">
-                                ${raw(icon('upload', { size: 15 }))} Import from a spreadsheet
-                            </button>
-                            <button class="btn btn-secondary" data-do="export-store">
-                                ${raw(icon('download', { size: 15 }))} Export one section as JSON
-                            </button>
+                            ${session.can('student.edit') ? html`
+                                <button class="btn btn-secondary" data-do="import">
+                                    ${raw(icon('upload', { size: 15 }))} Import from a spreadsheet
+                                </button>
+                            ` : ''}
+                            ${session.can('data.export') ? html`
+                                <button class="btn btn-secondary" data-do="export-store">
+                                    ${raw(icon('download', { size: 15 }))} Export one section as JSON
+                                </button>
+                            ` : ''}
                             <p class="type-caption type-muted">
                                 Per-report CSV exports live on the reports screen, where the columns
                                 and filters are already chosen.
@@ -1401,12 +1429,13 @@ export default class SettingsPage extends Page {
                 </div>
             </div>
 
-            ${session.can('backup.manage') ? html`
+            ${session.can('data.restore') ? html`
                 <div class="card">
                     <div class="card-header">
                         <h2 class="card-title">Restore</h2>
                         <p class="card-subtitle">
                             Replaces everything currently held with the contents of a backup file.
+                            Administrator only.
                         </p>
                     </div>
                     <div class="card-body">

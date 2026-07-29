@@ -230,7 +230,7 @@ const COMMANDS = [
     { id: 'issue-certificate',label: 'Issue a certificate',  hint: 'For a student or programme',  icon: 'award',       capability: 'certificate.issue',route: '#/certificates?action=issue' },
     { id: 'verify-certificate',label: 'Verify a certificate',hint: 'Look up a serial',            icon: 'search',      capability: 'program.view', route: '#/certificates?action=verify' },
     { id: 'run-report',     label: 'Run a report',           hint: 'Export or print',             icon: 'file-text',   capability: 'report.view',      route: '#/reports' },
-    { id: 'take-backup',    label: 'Take a backup',          hint: 'Download all data',           icon: 'download',    capability: 'backup.manage',  route: '#/settings?tab=backup' },
+    { id: 'take-backup',    label: 'Take a backup',          hint: 'Download all data',           icon: 'download',    capability: 'backup.create',  route: '#/settings?tab=data' },
     { id: 'audit-log',      label: 'Open the audit log',     hint: 'Who changed what',            icon: 'shield',      capability: 'audit.view',       route: '#/settings?tab=audit' }
 ];
 

@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.22.0',
+    version: '2.23.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -484,10 +484,46 @@ export const CAPABILITIES = Object.freeze({
     PROGRAM_VIEW: 'program.view', PROGRAM_EDIT: 'program.edit',
     CERTIFICATE_ISSUE: 'certificate.issue',
     REPORT_VIEW: 'report.view', REPORT_EXPORT: 'report.export',
+
+    // settings.edit is the **Business Settings** capability — institute
+    // details, branches, academic years, fee plans, curriculum, master data,
+    // announcements. Owner + Administrator. It is deliberately scoped to the
+    // academy's own configuration and never to the system's: Firebase/API/
+    // environment/system configuration is a separate, Administrator-only
+    // capability (SYSTEM_CONFIGURE below, the "System Settings" half of this
+    // split) rather than a second value bolted onto this one. See
+    // SETTINGS_GROUPS below and docs/architecture/IAM_ROLE_MODEL.md §2a.
     SETTINGS_VIEW: 'settings.view', SETTINGS_EDIT: 'settings.edit',
-    AUDIT_VIEW: 'audit.view',
-    BACKUP_MANAGE: 'backup.manage',
-    // Action-level permissions inside the Users tab — settings.edit still
+    AUDIT_VIEW: 'audit.view', AUDIT_PURGE: 'audit.purge',
+
+    // Data movement. These three were one capability (`backup.manage`) until
+    // the Owner role upgrade, which needed the boundary drawn between them:
+    // the Owner takes backups and exports data as a matter of routine; only
+    // an Administrator may replace or erase the database.
+    BACKUP_CREATE: 'backup.create', DATA_EXPORT: 'data.export', DATA_RESTORE: 'data.restore',
+
+    // System-level concerns, reserved to Administrator (ADMINISTRATOR_ONLY
+    // below). No screen grants any of these today — they are declared so the
+    // reservation is expressed in the model rather than left implicit, and so
+    // the features that will eventually need them have a gate to hang on
+    // instead of reaching for settings.edit and quietly widening it.
+    //
+    // SYSTEM_CONFIGURE is "System Settings" — the other half of the
+    // settings.edit split above: Firebase configuration, API configuration,
+    // environment configuration, application configuration, system
+    // constants. Nothing in the Settings module exercises it today (there is
+    // no Firebase/environment screen); reused rather than duplicated the
+    // moment one exists.
+    SYSTEM_CONFIGURE: 'system.configure',
+    // Application maintenance — database maintenance, migration utilities,
+    // developer tools, debug mode, performance tools, version updates,
+    // deployment operations, system upgrades. All of it Administrator-only:
+    // none of it is an academy operating decision.
+    SYSTEM_MAINTAIN: 'system.maintain',
+    ROLE_MANAGE: 'role.manage',             // create/delete roles, edit role definitions, the permission matrix
+    SECURITY_MANAGE: 'security.manage',     // security, password, MFA and session policies
+
+    // Action-level permissions inside the Users tab — settings.view still
     // gates whether the tab is reachable at all; these gate which of its
     // buttons a given role actually sees (Doc 6 §22).
     USER_VIEW: 'user.view', USER_CREATE: 'user.create', USER_EDIT: 'user.edit',
@@ -498,40 +534,116 @@ export const CAPABILITIES = Object.freeze({
 const ALL_CAPS = Object.values(CAPABILITIES);
 
 /**
+ * Retired capability strings, mapped to what replaced them.
+ *
+ * `backup.manage` bundled three separable things — take a backup, export a
+ * section, replace/erase the database — and the Owner upgrade had to draw a
+ * line straight through the middle of it. Nothing in the application names it
+ * any more, but a role matrix stored in the database (`roles.override`, see
+ * the resolution seam below) or one travelling inside an older backup file
+ * still can. Expanding it here means such a matrix keeps granting what it
+ * always granted, instead of silently granting nothing.
+ */
+const CAPABILITY_ALIASES = Object.freeze({
+    'backup.manage': [CAPABILITIES.BACKUP_CREATE, CAPABILITIES.DATA_EXPORT, CAPABILITIES.DATA_RESTORE]
+});
+
+/**
+ * The permissions reserved to Administrator — the whole of the difference
+ * between Administrator and Owner, in one list.
+ *
+ * Written as the *exclusions* rather than enumerating what the Owner holds,
+ * because that is the business rule as stated: the Owner does everything
+ * except these. A capability added to CAPABILITIES later therefore reaches
+ * the Owner automatically, which is the right default for an operational
+ * permission and the wrong one only for a system-level permission — and a
+ * system-level permission is exactly the kind whose author is already
+ * looking at this list.
+ */
+export const ADMINISTRATOR_ONLY_CAPABILITIES = Object.freeze([
+    CAPABILITIES.SYSTEM_CONFIGURE,
+    CAPABILITIES.SYSTEM_MAINTAIN,
+    CAPABILITIES.ROLE_MANAGE,
+    CAPABILITIES.SECURITY_MANAGE,
+    CAPABILITIES.DATA_RESTORE,
+    CAPABILITIES.AUDIT_PURGE
+]);
+
+/**
+ * The Owner's grant: everything the application can do, less the reserved
+ * list above. Exported so the Roles screen, the documentation and any future
+ * test can assert the relationship rather than re-derive it by hand.
+ */
+export const OWNER_CAPABILITIES = Object.freeze(
+    ALL_CAPS.filter((cap) => !ADMINISTRATOR_ONLY_CAPABILITIES.includes(cap))
+);
+
+/**
+ * Named split of what used to be discussed as one undifferentiated "settings"
+ * concern. Not two independent capabilities — SYSTEM_CONFIGURE was already
+ * declared and already reserved (ADMINISTRATOR_ONLY_CAPABILITIES above);
+ * this constant exists so "Business Settings" and "System Settings" are
+ * things a reader of this file can find by name, rather than a distinction
+ * that only lives in a comment. The Roles screen and settings.page.js read
+ * through this rather than the two capability strings directly, so the
+ * grouping stays correct if either side is ever renamed.
+ */
+export const SETTINGS_GROUPS = Object.freeze({
+    business: { label: 'Business Settings', capability: CAPABILITIES.SETTINGS_EDIT },
+    system: { label: 'System Settings', capability: CAPABILITIES.SYSTEM_CONFIGURE }
+});
+
+/**
  * Four roles, per the IAM Security Policy (Document 10 §8) and this
  * project's approved combined role model — not five. `owner` + `accountant`
  * merge into `owner_accountant`; `registrar` + `teacher` merge into
  * `teacher_reception` (a registrar's admissions/students/attendance/fee
- * work is front-office "reception" work in this model); `administrator`
- * becomes the sole full-access role (previously shared with `owner`); and
- * `viewer` is new — read-only across every module, for someone who needs
- * visibility without being able to change anything.
+ * work is front-office "reception" work in this model); and `viewer` is new
+ * — read-only across every module, for someone who needs visibility without
+ * being able to change anything.
  *
- * Each merged role keeps the union of its predecessors' capabilities,
- * except `owner_accountant`, which additionally gets SETTINGS_VIEW (an
- * owner-type person reasonably wants to see institute configuration) but
- * deliberately not SETTINGS_EDIT/AUDIT_VIEW/BACKUP_MANAGE/USER_* — those
- * are "Full System Access" concerns the spec reserves to Administrator
- * alone (Doc 6 §22: "only an Administrator creates users").
+ * The hierarchy is
+ *
+ *     Administrator  →  Owner  →  Teacher & Reception  →  Viewer
+ *
+ * with a deliberate distinction at the top: Administrator is the highest
+ * *system* authority, Owner the highest *business* authority. They are not
+ * the same person and the split is not about seniority.
+ *
+ * `owner_accountant` was originally a narrow, largely read-only finance role.
+ * That never matched the academy: the owner is also its accountant, teaches
+ * classes, runs admissions and staffs reception, and a role that made her
+ * switch accounts to do her own job was a description of the software, not of
+ * the business. The Owner now holds every capability except the system-level
+ * ones in ADMINISTRATOR_ONLY_CAPABILITIES — configuration, role definitions,
+ * security policy, database restore/erase and audit-log destruction. She can
+ * read the audit log; she cannot rewrite it. This is a business-rule change,
+ * approved as such, not a fix.
+ *
+ * The Owner's `user.*` grant is not "every account except Administrator's
+ * data" — it is specifically **account-scoped**: she may create, edit and
+ * deactivate Owner, Teacher & Reception and Viewer accounts freely, exactly
+ * as an Administrator could. The one thing she may not do is touch anything
+ * where an *Administrator account* is on the other end — create one, promote
+ * someone into the role, or edit/deactivate an existing one. The restriction
+ * is keyed on the account's role, never on the actor's own role being Owner;
+ * see requireRoleAssignable()/requireRoleManagement() in settings.service.js
+ * and the /users rules in firestore.rules, both of which test
+ * `role == 'administrator'` and nothing broader.
+ *
+ * `teacher_reception` and `viewer` are untouched by that change, and are the
+ * roles future teachers and observers get.
  */
 export const ROLES = Object.freeze({
     administrator: {
         label: 'Administrator',
-        description: 'Full system access — settings, backups, user management and every module.',
+        description: 'Highest system authority — configuration, role definitions, security policy, database restore and every module.',
         capabilities: ALL_CAPS
     },
     owner_accountant: {
         label: 'Owner & Accountant',
-        description: 'Business and finance: admissions oversight, collections, expenses, salaries and financial reports.',
-        capabilities: [
-            CAPABILITIES.STUDENT_VIEW,
-            CAPABILITIES.ADMISSION_VIEW, CAPABILITIES.ADMISSION_APPROVE,
-            CAPABILITIES.FEE_VIEW, CAPABILITIES.FEE_COLLECT, CAPABILITIES.FEE_REFUND, CAPABILITIES.FEE_WAIVE,
-            CAPABILITIES.FINANCE_VIEW, CAPABILITIES.FINANCE_EDIT,
-            CAPABILITIES.STAFF_VIEW, CAPABILITIES.PROGRAM_VIEW,
-            CAPABILITIES.REPORT_VIEW, CAPABILITIES.REPORT_EXPORT,
-            CAPABILITIES.SETTINGS_VIEW
-        ]
+        description: 'Highest business authority — runs the academy day to day: students, teaching, admissions, money, staff, users, reports, backups and Business Settings. Not System Settings, and never an Administrator account.',
+        capabilities: OWNER_CAPABILITIES
     },
     teacher_reception: {
         label: 'Teacher & Reception',
@@ -694,9 +806,17 @@ export function roleTable() {
     return _rolesOverride || ROLES;
 }
 
-/** Capabilities granted to a role, resolved through the active matrix. */
+/**
+ * Capabilities granted to a role, resolved through the active matrix and with
+ * any retired capability string expanded to its replacements
+ * (CAPABILITY_ALIASES). The built-in table never contains an alias, so this
+ * only ever does work for a database-stored or restored matrix.
+ */
 export function roleCapabilities(roleKey) {
-    return roleTable()[roleKey]?.capabilities || [];
+    const granted = roleTable()[roleKey]?.capabilities || [];
+    if (!granted.some((cap) => cap in CAPABILITY_ALIASES)) return granted;
+
+    return [...new Set(granted.flatMap((cap) => CAPABILITY_ALIASES[cap] || [cap]))];
 }
 
 /** Display label for a role, resolved through the active matrix. */

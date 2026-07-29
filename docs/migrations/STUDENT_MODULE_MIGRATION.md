@@ -102,7 +102,11 @@ Create these under Firebase Console → Firestore Database → Indexes (or `fire
 
 ## 6. Security Rules
 
-See `firestore.rules`, `match /students/{studentId}` block. Summary:
+See `firestore.rules`, `match /students/{studentId}` block. Summary **as of this
+milestone** — the Owner role upgrade in v2.23.0 added Owner & Accountant to
+every write row below (`student.edit`, `student.delete`) and to
+`canManageStudents()`/`meta/counters`. See
+`docs/architecture/IAM_ROLE_MODEL.md` for the current model.
 
 | Operation | Who |
 |---|---|

@@ -100,14 +100,29 @@ invoices, so the two cannot disagree.
 
 ## Roles
 
-Five roles — owner, administrator, registrar, teacher, accountant — gate which
-screens and actions appear. Settings → Roles shows the full capability matrix.
+Four roles, in a deliberate hierarchy:
 
-**These are an operating convention, not a security boundary.** There is no
-server to enforce them. Anyone with access to this computer and this browser can
-reach the underlying database regardless of the role set here. Roles keep people
-out of screens that are not their job; the device login is what protects the
-records.
+```
+Administrator  →  Owner & Accountant  →  Teacher & Reception  →  Viewer
+```
+
+Administrator is the highest **system** authority — configuration, role
+definitions, security policy, database restore, audit-log deletion. Owner is the
+highest **business** authority and holds everything else: students, teaching,
+admissions, money, staff, users, reports and backups. The academy's owner is
+also its accountant, teacher and receptionist, and the role is scoped to match
+that rather than to a job title.
+
+Settings → Roles shows the full capability matrix in the app.
+`docs/architecture/IAM_ROLE_MODEL.md` is the authoritative description, including
+what is reserved to Administrator and why.
+
+**Two layers, only one of which is a boundary.** `firestore.rules` enforces
+access server-side, for every client — that is real. The `session.can()` /
+`session.require()` checks that decide which screens and buttons appear are an
+operating convention on top of it: they keep people out of screens that are not
+their job, and anyone with devtools can bypass them. Never rely on the second
+layer for anything the first one does not also enforce.
 
 ---
 

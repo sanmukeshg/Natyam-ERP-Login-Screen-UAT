@@ -19,7 +19,7 @@ import { session } from '../core/session.js';
 import { db } from '../core/db.js';
 import { localDate } from '../utils/date.js';
 import { toAmount } from '../utils/money.js';
-import { CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, levelsOf, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
+import { CAPABILITIES, ADMINISTRATOR_ONLY_CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, levelsOf, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
 import {
     settings$, branches$, academicYears$, feePlans$, users$, students$, staff$, batches$, invoices$,
     programs$, expenses$, branchIdsOf
@@ -473,8 +473,29 @@ export async function listUsers() {
     }));
 }
 
+/**
+ * The one guardrail that makes ADMINISTRATOR_ONLY_CAPABILITIES mean anything.
+ *
+ * The Owner may create users and assign existing roles — but if she could
+ * assign `administrator`, every permission reserved to Administrator would be
+ * one click away from being self-granted, and the reservation would be
+ * decoration. Minting or altering an Administrator therefore needs
+ * `role.manage`: Administrator alone. Enforced again server-side in
+ * firestore.rules (the /users create and update rules).
+ */
+function requireRoleManagement(action) {
+    if (session.can(CAPABILITIES.ROLE_MANAGE)) return;
+    throw new Error(`Your role (${session.roleLabel()}) cannot ${action}. Only an Administrator can.`);
+}
+
+/** Assigning `administrator` is itself an Administrator-only act. */
+function requireRoleAssignable(role) {
+    if (role === 'administrator') requireRoleManagement('grant the Administrator role');
+}
+
 export async function createUser(data) {
-    session.require('settings.edit', 'add a user');
+    session.require(CAPABILITIES.USER_CREATE, 'add a user');
+    requireRoleAssignable(data.role);
 
     // No default injected here — an Administrator must explicitly choose at
     // least one sign-in method for every account; there is no "assume
@@ -529,10 +550,19 @@ export async function createUser(data) {
 }
 
 export async function updateUser(id, changes) {
-    session.require('settings.edit', 'edit a user');
+    session.require(CAPABILITIES.USER_EDIT, 'edit a user');
 
     const existing = await users$.findOrFail(id);
     if (changes.role && !roleTable()[changes.role]) throw new Error('Choose a valid role.');
+
+    if (changes.role && changes.role !== existing.role) {
+        session.require(CAPABILITIES.USER_CHANGE_ROLE, 'change a user’s role');
+        requireRoleAssignable(changes.role);
+    }
+    // Editing anything at all on an existing Administrator's account is
+    // Administrator-only, for the same reason as above — otherwise the role
+    // could be left alone and the sign-in methods or email changed instead.
+    if (existing.role === 'administrator') requireRoleManagement('edit an Administrator account');
 
     // Toggling which methods are *permitted* only — this never creates or
     // links a Firebase Auth credential. Adding "password" here to an
@@ -579,10 +609,11 @@ export async function updateUser(id, changes) {
 }
 
 export async function deactivateUser(id) {
-    session.require('settings.edit', 'deactivate a user');
+    session.require(CAPABILITIES.USER_DEACTIVATE, 'deactivate a user');
 
     const user = await users$.findOrFail(id);
     if (user.role === 'administrator') {
+        requireRoleManagement('deactivate an Administrator account');
         const admins = (await users$.activeUsers()).filter((u) => u.role === 'administrator');
         if (admins.length <= 1) throw new Error('The last Administrator account cannot be deactivated.');
     }
@@ -591,9 +622,27 @@ export async function deactivateUser(id) {
     return users$.update(id, { status: 'inactive', deactivatedOn: localDate() });
 }
 
-/** The role matrix, for the permissions screen. */
+/**
+ * The role matrix, for the permissions screen.
+ *
+ * `key` is the constant name (STUDENT_VIEW), `label` the capability string
+ * (student.view) — and the grant test has to compare against the *string*,
+ * since that is what a role's `capabilities` array holds. It compared against
+ * the constant name, so every cell in the matrix read "not allowed" for every
+ * role, including Administrator. Found while verifying the Owner upgrade on
+ * this very screen.
+ *
+ * `administratorOnly` marks the rows that are the whole difference between
+ * Administrator and Owner, so the screen can say why rather than leaving a
+ * reader to diff two columns of ticks by eye.
+ */
 export function roleMatrix() {
-    const capabilities = Object.entries(CAPABILITIES).map(([key, label]) => ({ key, label }));
+    const capabilities = Object.entries(CAPABILITIES).map(([key, label]) => ({
+        key,
+        label,
+        administratorOnly: ADMINISTRATOR_ONLY_CAPABILITIES.includes(label)
+    }));
+
     return {
         capabilities,
         roles: Object.entries(roleTable()).map(([value, role]) => ({
@@ -602,7 +651,7 @@ export function roleMatrix() {
             description: role.description,
             grants: Object.fromEntries(capabilities.map((c) => [
                 c.key,
-                role.capabilities.includes('*') || role.capabilities.includes(c.key)
+                role.capabilities.includes('*') || roleCapabilities(value).includes(c.label)
             ]))
         }))
     };

@@ -13,8 +13,6 @@
  * leave the books unbalanced if the second write failed.
  */
 
-import { db, request } from '../core/db.js';
-
 /* ==========================================================================
    BRANCHES
    --------------------------------------------------------------------------
@@ -188,46 +186,18 @@ import { db, request } from '../core/db.js';
    students.service.js) keeps importing from this same file, unchanged.
    ========================================================================== */
 
-/**
- * Settings are key/value, not entities: no ids, no audit noise, no soft
- * delete. A thin wrapper rather than a Repository subclass, because none of
- * the base class's machinery applies.
- */
-export const settings$ = {
-    async get(key, fallback = null) {
-        const row = await db.get('settings', key);
-        return row ? row.value : fallback;
-    },
-
-    async set(key, value) {
-        await db.put('settings', { key, value, updatedAt: new Date().toISOString() });
-        return value;
-    },
-
-    async all() {
-        const rows = await db.all('settings');
-        return Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    },
-
-    /**
-     * Atomic counter for human-facing numbers (NAT/INV/2026/0417). Read and
-     * increment happen inside one transaction so two receipts written in the
-     * same tick cannot collide — 1.0 read the count of existing rows, which
-     * reused a number as soon as anything was deleted.
-     */
-    async nextSequence(name, count = 1) {
-        let allocated = 0;
-        await db.unit(['settings'], async (s) => {
-            const row = await request(s.settings.get('sequences'));
-            const map = { ...(row?.value || {}) };
-            const current = Number(map[name]) || 0;
-            allocated = current + 1;
-            map[name] = current + count;
-            await request(s.settings.put({ key: 'sequences', value: map, updatedAt: new Date().toISOString() }));
-        }, 'settings:sequence');
-        return allocated;
-    }
-};
+/* ==========================================================================
+   SETTINGS (key/value)
+   --------------------------------------------------------------------------
+   Moved to Firestore — the last IndexedDB holdout after the 24-entity
+   migration, found late (see settings.repository.firestore.js's own header
+   for why this mattered: sequence numbers and institute details were being
+   read/written per browser, not shared). The old IndexedDB implementation
+   is archived, not deleted, at js/data/archive/settings.repository.
+   indexeddb.js. `settings$` is re-exported from the Firestore module below
+   so every existing caller keeps importing from this same file, unchanged.
+   ========================================================================== */
+export { settings$ } from './settings.repository.firestore.js';
 
 /* ==========================================================================
    SINGLETONS

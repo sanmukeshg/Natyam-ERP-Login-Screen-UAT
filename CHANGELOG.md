@@ -9,6 +9,40 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.23.0] — 2026-07-30 — IAM: Owner role upgrade
+
+An intentional business-rule change, not a fix. `owner_accountant` was a narrow,
+largely read-only finance role; at NATYAM the owner is also the accountant, teaches
+classes, runs admissions and staffs reception, and a role that made her switch
+accounts to do her own job described the software rather than the business. The Owner
+is now the highest **business** authority — 33 of 39 capabilities — and Administrator
+remains the highest **system** authority.
+
+### Changed
+- **Owner & Accountant now holds every capability except six**, defined as an exclusion list (`ADMINISTRATOR_ONLY_CAPABILITIES`) rather than a second hand-maintained grant list. Newly gained: `student.edit`, `student.delete`, `admission.edit`, `attendance.view`, `attendance.mark`, `staff.edit`, `program.edit`, `certificate.issue`, `settings.edit`, `audit.view`, `backup.create`, `data.export`, and all seven `user.*` permissions. This reaches the existing account with **no data migration** — a user document stores a role key, never a capability list.
+- **Reserved to Administrator alone:** `system.configure` (Firebase/API/environment/app config, system constants), `system.maintain` (database maintenance, migrations, developer/debug/performance tools), `role.manage` (permission matrix, role definitions), `security.manage` (security/password/MFA/session policies), `data.restore` (restore and erase), `audit.purge` (deleting audit history). The Owner reads the audit log and can never delete from it.
+- **`backup.manage` split into `backup.create`, `data.export` and `data.restore`.** One capability had bundled "take a backup" with "replace the database", which is exactly the line the upgrade had to draw. The old string still resolves, via a new alias table, for any role matrix stored in the database or carried inside an older backup file.
+- **Teacher & Reception and Viewer are untouched** — 14 and 9 capabilities, identical to v2.22.0, asserted by the regression check below.
+- **`firestore.rules`: the server-side half of the same change.** New `canAdminister()` ("Administrator or Owner") replaces a bare `isAdministrator()` wherever that gate stood in for an operational capability the Owner now holds; `isAdministrator()` now means one thing only in that file — a reserved capability. Without this the upgrade would have produced "Missing or insufficient permissions" instead of working screens.
+- **Escalation guardrail — account-scoped, confirmed by review:** the Owner may create, edit and deactivate other Owner (and Teacher & Reception, Viewer) accounts exactly as an Administrator could. The one thing closed off is anything where an *Administrator account* is on the other end — creating one, promoting anyone into the role, or editing/deactivating an existing one. Every check tests the **account's** role (`data.role` / `existing.role` / `resource.data.role`), never the actor's own role beyond establishing she holds `user.*` at all — a broader, actor-scoped guard would have (incorrectly) also blocked Owner-to-Owner account management. Enforced in `settings.service.js` and again in `firestore.rules`; both patterns now asserted by a static regression check (§ below) so a future "simplification" can't quietly narrow the guard.
+- The Users tab's buttons are now gated by the `user.*` capabilities that had been declared since Doc 6 §22 and never wired to anything (they resolve identically for all four roles — Administrator and Owner hold them, Teacher and Viewer hold neither these nor `settings.edit`).
+- Settings → Roles marks reserved capabilities with a "system" badge.
+- **`settings.edit` formally split into Business Settings and System Settings.** `settings.edit` is now documented and named (`SETTINGS_GROUPS` in `app.config.js`) as specifically the **Business Settings** capability — institute, branches, academic years, fee plans, curriculum, master data, announcements — Owner and Administrator alike. **System Settings** — Firebase, API and environment configuration — is the already-declared, already-reserved `system.configure`, reused rather than duplicated (no screen exercises it today; the split exists so a future Firebase/environment screen has somewhere correct to attach without re-auditing `settings.edit`'s call sites). Settings → Roles now states the split in its own subtitle.
+- **`system.maintain`'s scope made explicit: application maintenance.** The capability already existed and was already reserved; its documented scope now explicitly names version updates, deployment operations and system upgrades alongside the database maintenance/migration/developer-tooling it already covered, per the review's specific concern that these stay Administrator-only as the application grows. No new capability — the same "reuse, don't duplicate" rule applied to `system.configure` above.
+
+### Fixed
+- **Settings → Roles showed every capability as *not allowed*, for every role including Administrator.** `roleMatrix()` tested `role.capabilities.includes('STUDENT_VIEW')` — the constant's *name* — against arrays that hold `'student.view'`, the constant's *value*. Every cell in the matrix was a dash. Found while verifying this change on that very screen.
+- The command palette's "Take a backup" opened Settings on the Institute tab: it linked to `?tab=backup`, and the tab is named `data`, so it fell through to the default panel.
+- Settings → Data no longer offers buttons that always failed. Backup/import/export were rendered for every role and refused at the service layer on click; they are now gated by `backup.create` / `student.edit` / `data.export`. No role gained or lost a permission — a Viewer simply no longer sees three buttons that never worked.
+- Added a `settings` collection rule to `firestore.rules`. The key/value settings store had just moved to Firestore (institute details, document-numbering sequences, `lastBackupAt`) with no rule of any kind, and the catch-all at the bottom of that file denies what it does not name — every role, including Administrator, would have failed to read the school's own name. Writes need `settings.edit`, with one exception: `sequences`, which anyone raising an invoice or receipt must be able to increment.
+
+### Documentation
+- New `docs/architecture/IAM_ROLE_MODEL.md` — the authoritative role model: hierarchy, the full 39 × 4 matrix, what each reserved capability covers, where enforcement actually happens, how to change the model, and how the hierarchy extends to multiple academies (Administrator global, Owner per-academy via the existing branch scoping — no fifth role).
+- `README.md`'s Roles section rewritten: it still described five roles (owner, administrator, registrar, teacher, accountant) from before the v2.15.0 consolidation, and still said roles were "not a security boundary" with "no server to enforce them", which stopped being true when `firestore.rules` shipped.
+- `STUDENT_MODULE_MIGRATION.md` §6 and `ADMISSIONS_MODULE_MIGRATION.md` §6 note that their rule tables are point-in-time records and point at the new document.
+
+---
+
 ## [2.22.0] — 2026-07-29 — Bug fixes from "New Bugs 2.21.0"
 
 Seven fixes found in real use of v2.21.0's changes, from a new document with six screenshots. All verified by code tracing (no interactive browser session available this round).

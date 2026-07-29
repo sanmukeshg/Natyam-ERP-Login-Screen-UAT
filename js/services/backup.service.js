@@ -54,7 +54,7 @@ const FIRESTORE_STORE_REPOS = {
     documents: documents$, admissionDrafts: drafts$, notifications: notifications$,
     branches: branches$, academicYears: academicYears$, curricula: curricula$,
     curriculumLevels: curriculumLevels$, holidays: holidays$,
-    auditLog: audit$
+    auditLog: audit$, settings: settings$
 };
 
 /* ==========================================================================
@@ -113,6 +113,9 @@ export async function buildBackup({ note = null } = {}) {
     data.curriculumLevels = await curriculumLevels$.all({ includeDeleted: true });
     data.holidays = await holidays$.all({ includeDeleted: true });
     data.auditLog = await audit$.all();
+    // The last IndexedDB holdout (settings$'s own header comment explains
+    // why it matters) — same override pattern as every entity above.
+    data.settings = await settings$.all();
 
     const counts = Object.fromEntries(Object.entries(data).map(([store, rows]) => [store, rows.length]));
 
@@ -132,7 +135,7 @@ export async function buildBackup({ note = null } = {}) {
 
 /** Builds a backup and hands it to the browser as a download. */
 export async function downloadBackup({ note = null } = {}) {
-    session.require(CAPABILITIES.BACKUP_MANAGE, 'take a backup');
+    session.require(CAPABILITIES.BACKUP_CREATE, 'take a backup');
 
     const backup = await buildBackup({ note });
     const filename = `natyam-backup-${localDate()}.json`;
@@ -220,7 +223,7 @@ export async function inspectBackup(file) {
  * @param {boolean} [options.safetyCopy=true]  Download current data first.
  */
 export async function restore(backup, { safetyCopy = true } = {}) {
-    session.require(CAPABILITIES.BACKUP_MANAGE, 'restore from a backup');
+    session.require(CAPABILITIES.DATA_RESTORE, 'restore from a backup');
 
     if (backup.kind !== FILE_KIND) throw new Error('That is not a NATYAM ERP backup file.');
 
@@ -266,7 +269,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         documents: documentRows, admissionDrafts: draftRows, notifications: notificationRows,
         branches: branchRows, academicYears: academicYearRows, curricula: curriculumRows,
         curriculumLevels: curriculumLevelRows, holidays: holidayRows,
-        auditLog: auditLogRows,
+        auditLog: auditLogRows, settings: settingsRows,
         ...indexedDbStores
     } = known;
 
@@ -300,6 +303,10 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     if (curriculumLevelRows) await curriculumLevels$.replaceAll(curriculumLevelRows);
     if (holidayRows) await holidays$.replaceAll(holidayRows);
     if (auditLogRows) await audit$.replaceAll(auditLogRows);
+    // Settings last of the replaceAll calls, so the lastRestoreAt stamp
+    // written immediately below survives — replacing settings *after*
+    // stamping it would silently discard the stamp.
+    if (settingsRows) await settings$.replaceAll(settingsRows);
 
     await settings$.set('lastRestoreAt', nowISO());
 
@@ -336,7 +343,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
  * so nobody mistakes it for one.
  */
 export async function exportStore(storeName, { pretty = true } = {}) {
-    session.require(CAPABILITIES.BACKUP_MANAGE, 'export data');
+    session.require(CAPABILITIES.DATA_EXPORT, 'export data');
 
     if (!STORE_NAMES.includes(storeName)) throw new Error(`There is no "${storeName}" data to export.`);
 
@@ -367,7 +374,7 @@ export async function exportStore(storeName, { pretty = true } = {}) {
  * outlive the data they refer to.
  */
 export async function resetEverything({ safetyCopy = true, keepInstitute = true } = {}) {
-    session.require(CAPABILITIES.BACKUP_MANAGE, 'erase all data');
+    session.require(CAPABILITIES.DATA_RESTORE, 'erase all data');
 
     if (safetyCopy) {
         const current = await buildBackup({ note: 'Automatic safety copy taken before a full reset' });
@@ -383,17 +390,24 @@ export async function resetEverything({ safetyCopy = true, keepInstitute = true 
         await db.clear(store);
     }
 
+    // Settings live in Firestore now, so the loop above (IndexedDB only)
+    // does not touch them — clear them explicitly, or every sequence
+    // counter and the school's own details would outlive the erase.
+    await settings$.replaceAll([]);
+
     // Written after the clear so it survives it. `seedIfEmpty` checks this
     // before deciding whether an empty database is a fresh install or a
-    // deliberate erase.
+    // deliberate erase — and it reads IndexedDB directly (seed.js), so this
+    // marker deliberately stays local: it is a fact about *this browser's*
+    // local database, not about the school's shared records.
     await db.put('settings', {
         key: 'installation',
         value: { erasedAt: nowISO(), demoData: false }
     });
-    await db.put('settings', {
-        key: 'sequences',
-        value: { admission: 0, application: 0, invoice: 0, receipt: 0, certificate: 0 }
-    });
+    // Sequences, by contrast, must go through settings$ — they are read
+    // from Firestore by nextSequence(), so writing them to IndexedDB here
+    // would leave every counter running on from its pre-erase value.
+    await settings$.set('sequences', { admission: 0, application: 0, invoice: 0, receipt: 0, certificate: 0 });
     if (institute) await settings$.set('institute', institute);
 
     try {

@@ -183,7 +183,13 @@ export default class BatchesPage extends Page {
 
         try {
             const rows = await listBatches(session.branch(), { includeClosed: this.includeClosed });
-            if (token !== this.loadToken) return;
+            // A navigation away from Batches while this was in flight tears
+            // the page down but doesn't cancel this await — without this
+            // check, `this.container` still refers to the shared viewport
+            // element, now holding whatever page was navigated to instead,
+            // and querying it for "[data-role=...]" fails with a null
+            // container the moment that markup doesn't exist there.
+            if (token !== this.loadToken || this.disposed) return;
 
             this.rows = rows;
             if (!this.table) this.buildTable(rows); else this.table.setRows(rows);
@@ -197,7 +203,7 @@ export default class BatchesPage extends Page {
                 ${empty ? `· ${empty} with nobody in them` : ''}
             `);
         } catch (err) {
-            if (token !== this.loadToken) return;
+            if (token !== this.loadToken || this.disposed) return;
             console.error(err);
             toast.error(err.message);
             if (!this.table) this.buildTable([]);
