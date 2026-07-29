@@ -280,7 +280,7 @@ export default class AdmissionsPage extends Page {
 
         return [
             step('applicant', {
-                description: 'Who is applying.',
+                description: 'Who is applying, and the parent or guardian we contact.',
                 fields: () => [
                     { name: 'name', label: 'Full name', required: true, width: 'half', autofocus: true },
                     { name: 'dateOfBirth', label: 'Date of birth', type: 'date', required: true, width: 'half' },
@@ -293,12 +293,8 @@ export default class AdmissionsPage extends Page {
                         ]
                     },
                     { name: 'school', label: 'School or college', width: 'half' },
-                    { name: 'address', label: 'Address', type: 'textarea', rows: 2 }
-                ]
-            }),
-            step('guardian', {
-                description: 'The parent or guardian we contact.',
-                fields: () => [
+                    { name: 'address', label: 'Address', type: 'textarea', rows: 2 },
+                    { type: 'divider', label: 'Parent or guardian' },
                     { name: 'guardianName', label: 'Name', required: true, width: 'half' },
                     {
                         name: 'guardianRelation', label: 'Relationship', type: 'select', required: true,
@@ -313,7 +309,13 @@ export default class AdmissionsPage extends Page {
                 ]
             }),
             step('placement', {
-                description: 'Where they will study, and at what level.',
+                description: 'Where they will study, at what level, and — optionally — which batch.',
+                // render() (below) draws the branch/level selects plus the
+                // batch control once onMount has fetched the eligible
+                // batches, but the wizard's absorb() only ever reads values
+                // through this list — without a descriptor for each field
+                // here, a chosen value is silently dropped and never reaches
+                // `data`, however correctly it renders.
                 fields: () => [
                     { name: 'branchId', label: 'Branch', type: 'select', required: true, width: 'half',
                       options: branchOptions },
@@ -321,52 +323,71 @@ export default class AdmissionsPage extends Page {
                         name: 'level', label: 'Starting level', type: 'select', required: true, width: 'half',
                         options: LEVELS.map((l) => ({ value: l.value, label: l.label, note: l.description })),
                         hint: 'A beginner starts at Prarambhika. A transfer may be placed higher after an assessment.'
-                    }
-                ]
-            }),
-            step('batch', {
-                description: 'Optional now — a batch is required before enrolment, not before applying.',
-                // render() (below) draws the actual control once onMount has
-                // fetched the eligible batches, but the wizard's absorb() only
-                // ever reads values through this list — without a descriptor
-                // for it here, a chosen preferred batch is silently dropped
-                // and never reaches `data`, however correctly it renders.
-                fields: () => [{ name: 'preferredBatchId', type: 'select' }],
+                    },
+                    { name: 'preferredBatchId', type: 'select' }
+                ],
                 render: (data) => html`
-                    <div data-role="batch-slot">
+                    ${renderFields([
+                        { name: 'branchId', label: 'Branch', type: 'select', required: true, width: 'half',
+                          value: data.branchId, options: branchOptions },
+                        {
+                            name: 'level', label: 'Starting level', type: 'select', required: true, width: 'half',
+                            value: data.level,
+                            options: LEVELS.map((l) => ({ value: l.value, label: l.label, note: l.description })),
+                            hint: 'A beginner starts at Prarambhika. A transfer may be placed higher after an assessment.'
+                        }
+                    ])}
+                    <div data-role="batch-slot" class="mt-4">
                         <p class="type-muted">Checking which batches have room…</p>
                     </div>
                 `,
                 onMount: async (bodyEl, { data, refresh }) => {
                     void refresh;
-                    const slot = bodyEl.querySelector('[data-role="batch-slot"]');
-                    if (!slot) return;
 
-                    if (!data.level) {
-                        render(slot, html`<p class="type-muted">Choose a level first.</p>`);
-                        return;
-                    }
+                    // Level and branch now live on this same step (merged
+                    // with Batch) — unlike the old two-step flow, where both
+                    // were already fixed by the time this step was reached,
+                    // the batch list must react live to them changing here.
+                    // Read straight off the DOM rather than `data`, since the
+                    // wizard's own absorb() (which updates `data`) is a
+                    // separate delegated listener with no fixed ordering
+                    // relative to this one for the same input event.
+                    const paintBatches = async () => {
+                        const slot = bodyEl.querySelector('[data-role="batch-slot"]');
+                        if (!slot) return;
 
-                    const batches = await eligibleBatches(data.level, data.branchId || null);
-                    render(slot, batches.length ? renderFields([{
-                        name: 'preferredBatchId',
-                        label: 'Preferred batch',
-                        type: 'select',
-                        value: data.preferredBatchId,
-                        placeholder: 'Decide at enrolment',
-                        options: batches.map((batch) => ({
-                            value: batch.id,
-                            label: `${batch.name} — ${batch.schedule || ''}`,
-                            note: batch.reason,
-                            disabled: !batch.selectable
-                        })),
-                        hint: 'A preference only. The batch is confirmed when the applicant is enrolled.'
-                    }]) : html`
-                        <div class="alert alert-warning">
-                            <p class="alert-body">No batch currently teaches this level with room to spare.
-                            The application can still proceed — a batch must be created or freed before enrolment.</p>
-                        </div>
-                    `);
+                        const level = bodyEl.querySelector('[name="level"]')?.value || data.level;
+                        const branchId = bodyEl.querySelector('[name="branchId"]')?.value || data.branchId;
+
+                        if (!level) {
+                            render(slot, html`<p class="type-muted">Choose a level first.</p>`);
+                            return;
+                        }
+
+                        const batches = await eligibleBatches(level, branchId || null);
+                        render(slot, batches.length ? renderFields([{
+                            name: 'preferredBatchId',
+                            label: 'Preferred batch',
+                            type: 'select',
+                            value: data.preferredBatchId,
+                            placeholder: 'Decide at enrolment',
+                            options: batches.map((batch) => ({
+                                value: batch.id,
+                                label: `${batch.name} — ${batch.schedule || ''}`,
+                                note: batch.reason,
+                                disabled: !batch.selectable
+                            })),
+                            hint: 'A preference only. The batch is confirmed when the applicant is enrolled.'
+                        }]) : html`
+                            <div class="alert alert-warning">
+                                <p class="alert-body">No batch currently teaches this level with room to spare.
+                                The application can still proceed — a batch must be created or freed before enrolment.</p>
+                            </div>
+                        `);
+                    };
+
+                    await paintBatches();
+                    on(bodyEl, 'input', '[name="level"], [name="branchId"]', () => paintBatches());
                 }
             }),
             step('experience', {
@@ -387,30 +408,12 @@ export default class AdmissionsPage extends Page {
                     { name: 'experienceNotes', label: 'Notes', type: 'textarea', rows: 2 }
                 ]
             }),
-            step('medical', {
-                description: 'Anything a teacher must know before the applicant dances.',
-                fields: () => [
-                    { name: 'medicalNotes', label: 'Medical notes', type: 'textarea', rows: 3,
-                      hint: 'Asthma, past injuries, allergies. Shown to teachers on the register.' },
-                    { name: 'consentPhotography', label: 'Consents to photography at performances',
-                      type: 'switch', value: true }
-                ]
-            }),
             step('fees', {
                 description: 'The plan this applicant will be billed on.',
                 fields: () => [
                     { name: 'feePlanId', label: 'Fee plan', type: 'select', required: true, options: planOptions },
                     { name: 'feeNotes', label: 'Concession or note', type: 'textarea', rows: 2,
                       hint: 'Any agreed discount is applied when the invoice is raised, not here.' }
-                ]
-            }),
-            step('documents', {
-                description: 'What the family has provided.',
-                fields: () => [
-                    { name: 'docIdProof', label: 'Identity proof seen', type: 'switch' },
-                    { name: 'docBirthCertificate', label: 'Birth certificate seen', type: 'switch' },
-                    { name: 'docPhotograph', label: 'Photograph provided', type: 'switch' },
-                    { name: 'documentNotes', label: 'Notes', type: 'textarea', rows: 2 }
                 ]
             }),
             step('review', {
@@ -429,8 +432,7 @@ export default class AdmissionsPage extends Page {
                             ['Branch', branch?.name],
                             ['Level', LEVELS.find((l) => l.value === data.level)?.label],
                             ['Fee plan', plan ? `${plan.name} — ${formatMoney(plan.amount)}/month` : null],
-                            ['Previous training', data.priorExperience],
-                            ['Medical', data.medicalNotes]
+                            ['Previous training', data.priorExperience]
                         ])}
                         <div class="alert alert-info mt-4">
                             <p class="alert-body">Submitting puts this application in the review queue.
@@ -459,7 +461,7 @@ export default class AdmissionsPage extends Page {
                             <div>
                                 <span class="type-strong">${draft.data?.name || 'Unnamed applicant'}</span>
                                 <div class="type-caption type-muted">
-                                    step ${(draft.step || 0) + 1} of ${ADMISSION_STEPS.length}
+                                    step ${Math.min((draft.step || 0) + 1, ADMISSION_STEPS.length)} of ${ADMISSION_STEPS.length}
                                     · saved ${formatDate(draft.updatedAt)}
                                 </div>
                             </div>
@@ -530,7 +532,6 @@ export default class AdmissionsPage extends Page {
                         ['Address', a.address],
                         ['Previous training', a.priorExperience],
                         ['Years of practice', a.yearsOfPractice],
-                        ['Medical', a.medicalNotes],
                         ['Fee plan', this.reference.plans.find((p) => p.id === a.feePlanId)?.name],
                         ['Decision note', a.decisionNote || a.rejectionReason]
                     ])}

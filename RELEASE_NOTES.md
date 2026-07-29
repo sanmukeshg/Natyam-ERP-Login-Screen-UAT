@@ -1,3 +1,44 @@
+# Release Notes — NATYAM ERP v2.21.0
+
+**Release:** Enhancement Round — Timetable/Attendance, Students, Admissions, Parents
+**Date:** 29 July 2026
+**Baseline:** v2.20.0
+**Type:** UI/workflow changes across four modules, from an approved change-request document, plus two bug fixes found while implementing it.
+
+## What changed for the academy
+
+**Timetable & Attendance**
+- Tapping a class on the Timetable now opens straight into that day's Attendance register — no more landing on the Batches page by mistake.
+- Take register / Postpone / Cancel are no longer separate buttons on the Timetable tile. Postpone and Cancel now live inside the Attendance register itself, next to the date.
+- The big "registers unmarked this week" panel is gone from the day board. In its place is a "Missing registers" button — click it to see every unmarked register and jump straight to the correct one (previously, this list could open the wrong date; that's fixed).
+- Fixed: the register's date line used to show the weekday twice ("Thursday, Thursday, 30 Jul 2026") — now shows it once.
+- The "does not normally meet on this day" note has been removed from the register screen, as requested.
+
+**Students**
+- All the filters (Everyone/Not in a batch/Fees overdue/At risk, Status, Level, Batch) are now behind one "Filter" button instead of spread across the top of the page — nothing was removed, it's just tidier. The button highlights when a filter is active.
+- The student list itself is simpler: just Student, Batch, and Fees columns, plus the Contact sheet export button is gone.
+- Opening a student now shows the everyday actions (Move batch, Collect fee, Promote, Status, Issue certificate) right under their name in orange, instead of at the bottom of the page.
+- Archive and Delete now sit next to Edit at the bottom of the profile. Archiving a student changes that button to "Restore Student" the next time you open their profile; restoring changes it back.
+
+**Admissions**
+- The New Application form is shorter: 5 steps instead of 9. Applicant and Parent details are now one step; Placement and Batch are now one step. Medical and Documents steps have been removed — NATYAM doesn't collect either.
+- Any application saved partway through, before this update, still opens and resumes correctly under the new, shorter form.
+
+**Parents**
+- Removed the "Export directory" button, the "No phone number" filter, and the "With siblings" / "Unreachable" tiles at the top of the page. Households and Owing remain.
+
+## For administrators / IT
+
+- No `firestore.rules` change and no data migration for any of the four modules — this is entirely an application-layer/UI change.
+- Nothing was removed from the database — Admissions' Medical/Documents fields simply stop being collected going forward; any historical data on older applications is untouched, just no longer shown on the application's own summary screens.
+
+## Quality
+
+- Static analysis clean after each of the four phases: no import cycles, all imports resolve, no undefined identifiers, no new dead code introduced.
+- Verified by direct code tracing rather than an interactive browser session this round (by agreement, since a live login wasn't available in this environment) — see the milestone report for the full manual UAT checklist to run through once, in a real browser, before this is considered fully signed off.
+
+---
+
 # Release Notes — NATYAM ERP v2.20.0
 
 **Release:** Milestone B2 — Restore the Old Attendance Screen

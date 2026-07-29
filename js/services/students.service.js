@@ -439,24 +439,6 @@ export async function household(studentId) {
  * performance venue. Emergency contact falls back to the guardian number so
  * the column is never blank when it matters most.
  */
-export async function contactSheet({ batchId = null, branchId = null } = {}) {
-    let rows = await students$.active(branchId);
-    if (batchId) rows = rows.filter((s) => s.batchId === batchId);
-
-    return rows
-        .sort((a, b) => a.name.localeCompare(b.name, 'en-IN'))
-        .map((s) => ({
-            id: s.id,
-            name: s.name,
-            admissionNo: s.admissionNo,
-            guardianName: s.guardianName,
-            guardianPhone: s.guardianPhone,
-            emergency: s.emergencyContact || s.guardianPhone,
-            bloodGroup: s.bloodGroup || null,
-            medicalNotes: s.medicalNotes || null
-        }));
-}
-
 /** Students whose medical notes a teacher must read before class. */
 export async function medicalAlerts(branchId = null) {
     return (await students$.active(branchId))

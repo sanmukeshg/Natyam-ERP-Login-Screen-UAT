@@ -32,7 +32,7 @@ import { STUDENT_STATUS, exposedFeeFrequencies } from '../../config/app.config.j
 
 import {
     listStudents, listFilters, profile, enrol, updateStudent, assignToBatch,
-    bulkAssign, promote, setStatus, archive, restore, deleteStudent, deletionImpact, household, contactSheet,
+    bulkAssign, promote, setStatus, archive, restore, deleteStudent, deletionImpact, household,
     levels as LEVELS
 } from '../../services/students.service.js';
 import { listBatches } from '../../services/batches.service.js';
@@ -41,12 +41,6 @@ import { listCurricula } from '../../services/curriculum.service.js';
 import { historyOf, describe as describeAudit } from '../../services/audit.service.js';
 
 const FEE_BADGE = { clear: 'badge-success', due: 'badge-warning', overdue: 'badge-danger' };
-const STATUS_BADGE = {
-    active: 'badge-success',
-    on_leave: 'badge-warning',
-    graduated: 'badge-info',
-    inactive: 'badge-neutral'
-};
 
 export default class StudentsPage extends Page {
     constructor(context) {
@@ -68,7 +62,7 @@ export default class StudentsPage extends Page {
         this.bind();
 
         this.options = await listFilters(session.branch());
-        render(this.container.querySelector('[data-role="filters"]'), this.filterBar());
+        this.refreshFilterButton();
 
         this.buildTable();
         await this.load();
@@ -87,8 +81,8 @@ export default class StudentsPage extends Page {
                     <p class="page-subtitle" data-role="count">Loading the roll…</p>
                 </div>
                 <div class="page-actions">
-                    <button class="btn btn-secondary btn-sm" data-action="contact-sheet">
-                        ${raw(icon('download', { size: 15 }))} Contact sheet
+                    <button class="btn btn-secondary btn-sm" data-action="filter">
+                        ${raw(icon('filter', { size: 15 }))} Filter
                     </button>
                     ${session.can('student.edit') ? html`
                         <button class="btn btn-primary btn-sm" data-action="new">
@@ -98,13 +92,14 @@ export default class StudentsPage extends Page {
                 </div>
             </header>
             <div class="page-body">
-                <div class="filter-bar" data-role="filters"></div>
                 <div data-role="table"></div>
             </div>
         `;
     }
 
-    filterBar() {
+    /* ------------------------------------------------------------- FILTERS */
+
+    filterPanelContent() {
         const chips = [
             { key: '', label: 'Everyone' },
             { key: 'unplaced', label: 'Not in a batch' },
@@ -113,17 +108,20 @@ export default class StudentsPage extends Page {
         ];
 
         return html`
-            <div class="row row-wrap">
-                ${chips.map((chip) => html`
-                    <button class="btn btn-sm ${this.filters.filter === chip.key ? 'btn-primary' : 'btn-secondary'}"
-                            data-quick="${chip.key}" aria-pressed="${this.filters.filter === chip.key}">
-                        ${chip.label}
-                    </button>
-                `)}
-            </div>
-            <div class="row row-wrap">
+            <div class="stack stack-md">
+                <div>
+                    <span class="type-caption type-muted">Quick filters</span>
+                    <div class="row row-wrap mt-2">
+                        ${chips.map((chip) => html`
+                            <button class="btn btn-sm ${this.filters.filter === chip.key ? 'btn-primary' : 'btn-secondary'}"
+                                    data-quick="${chip.key}" aria-pressed="${this.filters.filter === chip.key}">
+                                ${chip.label}
+                            </button>
+                        `)}
+                    </div>
+                </div>
                 <label class="filter-control">
-                    <span class="sr-only">Status</span>
+                    <span class="type-caption type-muted">Status</span>
                     <select class="select select-sm" data-filter="status">
                         <option value="all" ${this.filters.status === 'all' ? 'selected' : ''}>All statuses</option>
                         ${this.options.statuses.map((option) => html`
@@ -134,7 +132,7 @@ export default class StudentsPage extends Page {
                     </select>
                 </label>
                 <label class="filter-control">
-                    <span class="sr-only">Level</span>
+                    <span class="type-caption type-muted">Level</span>
                     <select class="select select-sm" data-filter="level">
                         <option value="">All levels</option>
                         ${this.options.levels.map((option) => html`
@@ -145,7 +143,7 @@ export default class StudentsPage extends Page {
                     </select>
                 </label>
                 <label class="filter-control">
-                    <span class="sr-only">Batch</span>
+                    <span class="type-caption type-muted">Batch</span>
                     <select class="select select-sm" data-filter="batchId">
                         <option value="">All batches</option>
                         ${this.options.batches.map((option) => html`
@@ -162,6 +160,45 @@ export default class StudentsPage extends Page {
         `;
     }
 
+    async openFilters() {
+        await drawer({
+            title: 'Filter students',
+            description: 'Every filter for this list, in one place.',
+            size: 'sm',
+            content: this.filterPanelContent(),
+            actions: [{ label: 'Done', variant: 'primary', primary: true, value: null }],
+            onMount: (body) => {
+                const repaint = () => render(body, this.filterPanelContent());
+
+                on(body, 'click', '[data-quick]', (_e, target) => {
+                    this.filters.filter = target.dataset.quick;
+                    repaint();
+                    this.refreshFilterButton();
+                    this.load();
+                });
+                on(body, 'change', '[data-filter]', (_e, target) => {
+                    this.filters[target.dataset.filter] = target.value;
+                    repaint();
+                    this.refreshFilterButton();
+                    this.load();
+                });
+                on(body, 'click', '[data-action="clear-filters"]', () => {
+                    this.filters = { status: STUDENT_STATUS.ACTIVE, level: '', batchId: '', filter: '' };
+                    repaint();
+                    this.refreshFilterButton();
+                    this.load();
+                });
+            }
+        });
+    }
+
+    refreshFilterButton() {
+        const btn = this.container.querySelector('[data-action="filter"]');
+        if (!btn) return;
+        btn.classList.toggle('btn-primary', this.isFiltered());
+        btn.classList.toggle('btn-secondary', !this.isFiltered());
+    }
+
     isFiltered() {
         return Boolean(this.filters.level || this.filters.batchId || this.filters.filter
             || this.filters.status !== STUDENT_STATUS.ACTIVE);
@@ -169,38 +206,7 @@ export default class StudentsPage extends Page {
 
     bind() {
         this.onDispose(on(this.container, 'click', '[data-action="new"]', () => this.newStudent()));
-        this.onDispose(on(this.container, 'click', '[data-action="contact-sheet"]', () => this.exportContacts()));
-        // Row actions. The table suppresses row-click for anything inside a
-        // button, so these never open the profile by accident.
-        this.onDispose(on(this.container, 'click', '[data-student-act]', async (event, target) => {
-            event.stopPropagation();
-            const id = target.dataset.id;
-            const act = target.dataset.studentAct;
-            try {
-                if (act === 'view') return await this.openProfile(id);
-                const { student } = await profile(id);
-                if (act === 'edit') return await this.editStudent(student);
-                if (act === 'archive') return await this.archiveStudent(student);
-                if (act === 'restore') return await this.profileAction('restore', student);
-                if (act === 'delete') return await this.deleteStudentRow(student);
-            } catch (err) {
-                toast.error(err.message);
-            }
-        }));
-        this.onDispose(on(this.container, 'change', '[data-filter]', (_e, target) => {
-            this.filters[target.dataset.filter] = target.value;
-            this.load();
-        }));
-        this.onDispose(on(this.container, 'click', '[data-quick]', (_e, target) => {
-            this.filters.filter = target.dataset.quick;
-            render(this.container.querySelector('[data-role="filters"]'), this.filterBar());
-            this.load();
-        }));
-        this.onDispose(on(this.container, 'click', '[data-action="clear-filters"]', () => {
-            this.filters = { status: STUDENT_STATUS.ACTIVE, level: '', batchId: '', filter: '' };
-            render(this.container.querySelector('[data-role="filters"]'), this.filterBar());
-            this.load();
-        }));
+        this.onDispose(on(this.container, 'click', '[data-action="filter"]', () => this.openFilters()));
 
         [EVENTS.STUDENT_CREATED, EVENTS.STUDENT_UPDATED, EVENTS.PAYMENT_RECORDED, EVENTS.BRANCH_CHANGED]
             .forEach((event) => this.events.on(event, () => this.load()));
@@ -240,27 +246,10 @@ export default class StudentsPage extends Page {
                     `
                 },
                 {
-                    key: 'levelLabel', label: 'Level', sortable: true,
-                    sortValue: (row) => LEVELS.findIndex((l) => l.value === row.level)
-                },
-                {
-                    key: 'branchName', label: 'Branch', sortable: true,
-                    render: (row) => row.branchName || html`<span class="type-muted">—</span>`
-                },
-                {
                     key: 'batchName', label: 'Batch', sortable: true,
                     render: (row) => row.batchName
                         ? html`<span>${row.batchName}</span>`
                         : html`<span class="badge badge-warning">Not placed</span>`
-                },
-                {
-                    key: 'guardianName', label: 'Guardian', sortable: true,
-                    render: (row) => row.guardianName
-                        ? html`<div>
-                                   <span>${row.guardianName}</span>
-                                   <div class="type-caption type-muted">${row.guardianPhone || ''}</div>
-                               </div>`
-                        : html`<span class="type-muted">—</span>`
                 },
                 {
                     key: 'outstanding', label: 'Fees', align: 'right', sortable: true,
@@ -268,35 +257,6 @@ export default class StudentsPage extends Page {
                     render: (row) => html`
                         <span class="badge ${FEE_BADGE[row.feeState]}">
                             ${row.feeState === 'clear' ? 'Clear' : formatMoney(row.outstanding)}
-                        </span>
-                    `
-                },
-                {
-                    key: 'status', label: 'Status', sortable: true,
-                    render: (row) => html`<span class="badge ${STATUS_BADGE[row.status] || 'badge-neutral'}">
-                        ${String(row.status).replace(/_/g, ' ')}</span>`
-                },
-                {
-                    // The profile drawer still holds the full set of operations,
-                    // but View / Edit / Archive were reachable only by knowing
-                    // to click the row and then a second "Actions" button. The
-                    // three everyday actions now sit on the row itself.
-                    key: 'rowActions', label: '', align: 'right', sortable: false,
-                    render: (row) => html`
-                        <span class="row-actions">
-                            <button class="btn btn-sm btn-ghost" data-student-act="view" data-id="${row.id}"
-                                    title="View profile" aria-label="View ${row.name}">View</button>
-                            ${canEdit ? html`
-                                <button class="btn btn-sm btn-ghost" data-student-act="edit" data-id="${row.id}"
-                                        title="Edit details" aria-label="Edit ${row.name}">Edit</button>
-                                ${row.deletedAt
-                                    ? html`<button class="btn btn-sm btn-ghost" data-student-act="restore" data-id="${row.id}"
-                                                   title="Restore student" aria-label="Restore ${row.name}">Restore</button>`
-                                    : html`<button class="btn btn-sm btn-ghost" data-student-act="archive" data-id="${row.id}"
-                                                   title="Archive — keeps the record" aria-label="Archive ${row.name}">Archive</button>`}
-                                <button class="btn btn-sm btn-danger-quiet" data-student-act="delete" data-id="${row.id}"
-                                        title="Delete permanently" aria-label="Delete ${row.name}">Delete</button>
-                            ` : ''}
                         </span>
                     `
                 }
@@ -541,6 +501,20 @@ export default class StudentsPage extends Page {
             description: `${data.level?.label || ''} · ${data.batch?.name || 'not placed'} · ${data.student.admissionNo || ''}`,
             size: 'wide',
             content: html`
+                ${session.can('student.edit') ? html`
+                    <div class="profile-ops">
+                        <span class="profile-ops-label">Operations</span>
+                        <div class="profile-ops-row">
+                            <button class="btn btn-sm btn-warning" data-profile-action="assign">
+                                ${data.student.batchId ? 'Move batch' : 'Place in batch'}</button>
+                            ${session.can('fee.collect')
+                                ? html`<button class="btn btn-sm btn-warning" data-profile-action="collect">Collect fee</button>` : ''}
+                            <button class="btn btn-sm btn-warning" data-profile-action="promote">Promote</button>
+                            <button class="btn btn-sm btn-warning" data-profile-action="status">Status</button>
+                            <button class="btn btn-sm btn-warning" data-profile-action="certificate">Issue certificate</button>
+                        </div>
+                    </div>
+                ` : ''}
                 <div class="drawer-tabs">
                     <div class="tabs" role="tablist">
                         ${tabs.map((tab) => html`
@@ -550,23 +524,6 @@ export default class StudentsPage extends Page {
                     </div>
                     <div class="tab-panel" data-role="panel"></div>
                 </div>
-                ${session.can('student.edit') ? html`
-                    <div class="profile-ops">
-                        <span class="profile-ops-label">Operations</span>
-                        <div class="profile-ops-row">
-                            <button class="btn btn-sm btn-ghost" data-profile-action="assign">
-                                ${data.student.batchId ? 'Move batch' : 'Place in batch'}</button>
-                            ${session.can('fee.collect')
-                                ? html`<button class="btn btn-sm btn-ghost" data-profile-action="collect">Collect fee</button>` : ''}
-                            <button class="btn btn-sm btn-ghost" data-profile-action="promote">Promote a level</button>
-                            <button class="btn btn-sm btn-ghost" data-profile-action="status">Change status</button>
-                            <button class="btn btn-sm btn-ghost" data-profile-action="certificate">Issue certificate</button>
-                            ${data.student.deletedAt
-                                ? html`<button class="btn btn-sm btn-ghost" data-profile-action="restore">Restore</button>`
-                                : html`<button class="btn btn-sm btn-danger-quiet" data-profile-action="archive">Archive</button>`}
-                        </div>
-                    </div>
-                ` : ''}
             `,
             actions: this.profileActions(data),
             onMount: (body, api) => {
@@ -598,9 +555,11 @@ export default class StudentsPage extends Page {
         const actions = [{ label: 'Close', variant: 'secondary', value: null }];
         if (!session.can('student.edit')) return actions;
 
-        // Close and Edit. Edit opens the record for editing and saving, rather
-        // than a second menu — every other operation is listed in the profile
-        // itself, so nothing sits behind an extra click.
+        // Close and Edit sit together, followed by Archive/Restore and Delete —
+        // every other operation lives in the Operations row above, so nothing
+        // here sits behind an extra click. Archive and Restore are the same
+        // slot: which one shows depends on whether the student is currently
+        // archived, and it flips back the next time this drawer is opened.
         return [
             ...actions,
             {
@@ -610,6 +569,31 @@ export default class StudentsPage extends Page {
                 onClick: async ({ close }) => {
                     close(null);
                     await this.editStudent(student);
+                }
+            },
+            student.deletedAt
+                ? {
+                    label: 'Restore Student',
+                    variant: 'secondary',
+                    onClick: async ({ close }) => {
+                        close(null);
+                        await this.profileAction('restore', student);
+                    }
+                }
+                : {
+                    label: 'Archive',
+                    variant: 'danger-quiet',
+                    onClick: async ({ close }) => {
+                        close(null);
+                        await this.archiveStudent(student);
+                    }
+                },
+            {
+                label: 'Delete',
+                variant: 'danger-quiet',
+                onClick: async ({ close }) => {
+                    close(null);
+                    await this.deleteStudentRow(student);
                 }
             }
         ];
@@ -1134,19 +1118,6 @@ export default class StudentsPage extends Page {
     }
 
     /* ---------------------------------------------------------------- EXPORT */
-
-    async exportContacts() {
-        try {
-            const rows = await contactSheet({
-                batchId: this.filters.batchId || null,
-                branchId: session.branch()
-            });
-            downloadCSV(`natyam-contacts-${localDate()}`, rows);
-            toast.success(`${rows.length} contacts exported.`);
-        } catch (err) {
-            toast.error(err.message);
-        }
-    }
 
     exportSelection(ids) {
         const chosen = this.rows.filter((row) => ids.includes(row.id));

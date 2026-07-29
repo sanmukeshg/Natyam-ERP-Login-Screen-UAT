@@ -34,6 +34,7 @@ import { html, render, raw, on } from '../../utils/dom.js';
 import { icon } from '../../ui/icons.js';
 import { toast } from '../../ui/toast.js';
 import { drawer } from '../../ui/overlay.js';
+import { formOverlay } from '../../ui/form.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatNumber } from '../../utils/money.js';
@@ -45,6 +46,7 @@ import {
     openRegister, dayBoard, postRegister, monthlyGrid, missingRegisters
 } from '../../services/attendance.service.js';
 import { listBatches } from '../../services/batches.service.js';
+import { postponeSession, cancelSession } from '../../services/session.service.js';
 
 const MARKS = [
     { value: ATTENDANCE_STATUS.PRESENT, label: 'Present', short: 'P', tone: 'positive' },
@@ -78,6 +80,7 @@ export default class AttendancePage extends Page {
                     <p class="page-subtitle" data-role="subtitle">${formatDateLong(this.date)}</p>
                 </div>
                 <div class="page-actions">
+                    <div class="row row-tight" data-role="register-actions"></div>
                     <div class="row row-tight">
                         <button class="btn btn-secondary btn-icon btn-sm" data-shift="-1"
                                 aria-label="Previous day">${raw(icon('chevron-left', { size: 15 }))}</button>
@@ -88,6 +91,9 @@ export default class AttendancePage extends Page {
                     </div>
                     <button class="btn btn-secondary btn-sm" data-action="month">
                         ${raw(icon('calendar', { size: 15 }))} Month view
+                    </button>
+                    <button class="btn btn-secondary btn-sm" data-action="missing">
+                        ${raw(icon('alert-circle', { size: 15 }))} Missing registers
                     </button>
                 </div>
             </header>
@@ -107,11 +113,20 @@ export default class AttendancePage extends Page {
             this.batchId ? this.openBatchRegister(this.batchId) : this.loadBoard();
         }));
         this.onDispose(on(this.container, 'click', '[data-action="month"]', () => this.monthView()));
+        this.onDispose(on(this.container, 'click', '[data-action="missing"]', () => this.openMissingRegisters()));
         this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
             this.openBatchRegister(target.dataset.openBatch)));
         this.onDispose(on(this.container, 'click', '[data-action="back"]', () => {
             this.batchId = null;
             this.loadBoard();
+        }));
+        this.onDispose(on(this.container, 'click', '[data-postpone]', (event, target) => {
+            event.stopPropagation();
+            this.postponeSlot(target.dataset.postpone, target.dataset.date);
+        }));
+        this.onDispose(on(this.container, 'click', '[data-cancel-session]', (event, target) => {
+            event.stopPropagation();
+            this.cancelSlot(target.dataset.cancelSession, target.dataset.date);
         }));
 
         this.events.on(EVENTS.BRANCH_CHANGED, () => { this.batchId = null; this.loadBoard(); });
@@ -122,11 +137,11 @@ export default class AttendancePage extends Page {
     async loadBoard() {
         const body = this.container.querySelector('[data-role="body"]');
         render(body, html`<div class="skeleton skeleton-row"></div>`);
+        this.clearRegisterActions();
 
         try {
-            const [board, missing, holiday] = await Promise.all([
+            const [board, holiday] = await Promise.all([
                 dayBoard(this.date, session.branch()),
-                missingRegisters({ days: 7, branchId: session.branch() }),
                 holidays$.on(this.date, session.branch())
             ]);
 
@@ -134,14 +149,15 @@ export default class AttendancePage extends Page {
             render(this.container.querySelector('[data-role="subtitle"]'),
                 `${formatDateLong(this.date)} · ${board.batches.filter((b) => b.done).length} of ${board.batches.length} registers marked`);
 
-            render(body, this.boardView(board, missing, holiday));
+            render(body, this.boardView(board, holiday));
+            this.refreshMissingBadge();
         } catch (err) {
             console.error(err);
             toast.error(err.message);
         }
     }
 
-    boardView(board, missing, holiday) {
+    boardView(board, holiday) {
         if (holiday) {
             return html`
                 <div class="card"><div class="card-body">
@@ -155,21 +171,6 @@ export default class AttendancePage extends Page {
         }
 
         return html`
-            ${missing.length ? html`
-                <div class="alert alert-warning">
-                    <div class="alert-title">${missing.length} register${missing.length === 1 ? '' : 's'} unmarked this week</div>
-                    <ul class="stack stack-xs mt-2">
-                        ${missing.slice(0, 5).map((entry) => html`
-                            <li class="spread">
-                                <span>${entry.batch.name} · ${formatDate(entry.date)}</span>
-                                <button class="btn btn-sm btn-secondary"
-                                        data-open-batch="${entry.batch.id}">Mark</button>
-                            </li>
-                        `)}
-                    </ul>
-                </div>
-            ` : ''}
-
             ${board.batches.length ? html`
                 <div class="grid grid-3">
                     ${board.batches.map((batch) => html`
@@ -233,10 +234,152 @@ export default class AttendancePage extends Page {
 
         render(this.container.querySelector('[data-role="title"]'), this.register.batch.name);
         render(this.container.querySelector('[data-role="subtitle"]'),
-            `${this.register.dayName}, ${formatDateLong(this.date)} · ${this.register.entries.length} students`);
+            `${formatDateLong(this.date)} · ${this.register.entries.length} students`);
 
+        this.renderRegisterActions();
+        this.refreshMissingBadge();
         this.paintRegister();
         return undefined;
+    }
+
+    /* ------------------------------------------------------- POSTPONE / CANCEL */
+
+    clearRegisterActions() {
+        const slot = this.container.querySelector('[data-role="register-actions"]');
+        if (slot) render(slot, '');
+    }
+
+    renderRegisterActions() {
+        const slot = this.container.querySelector('[data-role="register-actions"]');
+        if (!slot) return;
+
+        const reg = this.register;
+        const inactive = reg.sessionStatus === 'postponed' || reg.sessionStatus === 'cancelled';
+        if (!session.can('student.edit') || inactive) {
+            render(slot, '');
+            return;
+        }
+
+        render(slot, html`
+            <button class="btn btn-sm btn-secondary" data-postpone="${reg.batch.id}" data-date="${this.date}">
+                Postpone
+            </button>
+            <button class="btn btn-sm btn-secondary" data-cancel-session="${reg.batch.id}" data-date="${this.date}">
+                Cancel
+            </button>
+        `);
+    }
+
+    async postponeSlot(batchId, date) {
+        const done = await formOverlay({
+            title: 'Postpone this class',
+            variant: 'modal',
+            size: 'sm',
+            submitLabel: 'Postpone',
+            intro: 'The original class stays in history as Postponed. A replacement class is scheduled at the new date and time you choose here — attendance is recorded against the replacement, never the original.',
+            fields: [
+                { name: 'newDate', label: 'New date', type: 'date', required: true, width: 'half', value: date },
+                { name: 'newStartTime', label: 'Start time', type: 'time', required: true, width: 'half' },
+                { name: 'newEndTime', label: 'End time', type: 'time', required: true, width: 'half' },
+                { name: 'reason', label: 'Reason', required: true, width: 'half',
+                  hint: 'Teacher unavailable, exams, venue unavailable, academy event…' },
+                { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 }
+            ],
+            onSubmit: async (values) => postponeSession(batchId, date, values)
+        });
+        if (done) {
+            toast.success('Class postponed — a replacement has been scheduled.');
+            this.batchId = null;
+            await this.loadBoard();
+        }
+    }
+
+    async cancelSlot(batchId, date) {
+        const done = await formOverlay({
+            title: 'Cancel this class',
+            variant: 'modal',
+            size: 'sm',
+            submitLabel: 'Cancel class',
+            danger: true,
+            intro: `This class on ${formatDate(date)} will not run. It stays in history as Cancelled — no replacement is created, and attendance can never be recorded against it.`,
+            fields: [
+                { name: 'reason', label: 'Reason', required: true },
+                { name: 'remarks', label: 'Remarks', type: 'textarea', rows: 2 }
+            ],
+            onSubmit: async (values) => cancelSession(batchId, date, values)
+        });
+        if (done) {
+            toast.success('Class cancelled.');
+            this.batchId = null;
+            await this.loadBoard();
+        }
+    }
+
+    /* ------------------------------------------------------------ MISSING REGISTERS */
+
+    refreshMissingBadge() {
+        missingRegisters({ days: 7, branchId: session.branch() })
+            .then((missing) => {
+                this.missing = missing;
+                const btn = this.container.querySelector('[data-action="missing"]');
+                if (!btn) return;
+                render(btn, html`
+                    ${raw(icon('alert-circle', { size: 15 }))} Missing registers
+                    ${missing.length ? html`<span class="badge badge-warning ml-1">${missing.length}</span>` : ''}
+                `);
+            })
+            .catch((err) => console.error(err));
+    }
+
+    async openMissingRegisters() {
+        let missing = this.missing;
+        if (!missing) {
+            try {
+                missing = await missingRegisters({ days: 7, branchId: session.branch() });
+            } catch (err) {
+                toast.error(err.message);
+                return;
+            }
+        }
+
+        await drawer({
+            title: 'Missing registers',
+            description: 'Registers not yet marked in the last 7 days.',
+            size: 'sm',
+            content: missing.length ? html`
+                <ul class="stack stack-sm">
+                    ${missing.map((entry) => html`
+                        <li class="spread">
+                            <div>
+                                <span class="type-strong">${entry.batch.name}</span>
+                                <div class="type-caption type-muted">${formatDate(entry.date)}</div>
+                            </div>
+                            <button class="btn btn-sm btn-secondary" data-mark="${entry.batch.id}" data-date="${entry.date}">
+                                Mark
+                            </button>
+                        </li>
+                    `)}
+                </ul>
+            ` : html`
+                <div class="empty empty-compact">
+                    <p class="empty-text">Nothing outstanding — every register in the last 7 days is marked.</p>
+                </div>
+            `,
+            actions: [{ label: 'Close', variant: 'secondary', value: null }],
+            onMount: (body, api) => {
+                on(body, 'click', '[data-mark]', (_e, target) => {
+                    api.close(null);
+                    this.goToRegister(target.dataset.mark, target.dataset.date);
+                });
+            }
+        });
+    }
+
+    goToRegister(batchId, date) {
+        this.date = date;
+        const input = this.container.querySelector('[data-role="date"]');
+        if (input) input.value = date;
+        this.openBatchRegister(batchId);
     }
 
     paintRegister() {

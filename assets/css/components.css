@@ -80,6 +80,17 @@
 }
 .btn-danger-quiet:hover:not(:disabled) { background: var(--danger-50); }
 
+/* Warning/orange — a student profile's Operations row (Move batch, Collect
+   fee, Promote, Status, Issue certificate), set apart from the drawer's
+   quieter Edit/Archive/Delete footer. */
+.btn-warning {
+    background: var(--warning-500);
+    color: var(--neutral-0);
+    box-shadow: var(--shadow-xs);
+}
+.btn-warning:hover:not(:disabled) { background: var(--warning-600); }
+.btn-warning:active:not(:disabled) { background: var(--warning-700); }
+
 .btn-link {
     height: auto;
     padding: 0;

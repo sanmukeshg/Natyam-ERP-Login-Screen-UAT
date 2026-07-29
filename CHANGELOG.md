@@ -9,6 +9,37 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.21.0] — 2026-07-29 — Enhancement Round: Timetable/Attendance, Students, Admissions, Parents
+
+Approved changes from the "New Updates in all the modules" document, implemented in four phases (Timetable/Attendance → Students → Admissions → Parents), each verified before the next began. Two pre-existing bugs, found while cross-checking the document's screenshots against the Attendance screen shipped in Milestone B2, were fixed as part of Phase 1.
+
+### Fixed
+- **"Thursday, Thursday" date duplication** on the register screen — `attendance.page.js` was prefixing `reg.dayName` onto `formatDateLong(this.date)`, which already includes the weekday name. Dropped the redundant prefix.
+- **"Mark" (from the Missing Registers list) opened the wrong date** — the day board's unmarked-registers list only carried a batch id, not the entry's own date, so it always opened whatever date the board currently displayed. The new Missing Registers panel (below) carries and uses each entry's actual date.
+
+### Changed — Timetable & Attendance (Phase 1)
+- **Clicking a Timetable tile now opens that class's Attendance register directly**, instead of navigating to Batches.
+- **Take register / Postpone / Cancel removed from the Timetable tile.** Postpone and Cancel now live inside the Attendance register screen itself (next to the date navigator), gated the same way they were on Timetable (`student.edit`, and hidden once a session is already Postponed or Cancelled — a new `sessionStatusOf()` read-only helper in `session.service.js` exposes this to `attendance.service.js#openRegister()` without breaking the existing rule that Attendance never reads the `classSessions` collection directly).
+- **The "N registers unmarked this week" panel is no longer shown inline on the day board.** A dedicated "Missing registers" header button (with a live count badge) opens it in a drawer instead; each entry now correctly navigates to its own date.
+- **The "does not normally meet on a —" make-up-class banner is removed** from the register screen, per this round's approval (a deliberate reversal of Milestone B2's own design).
+
+### Changed — Students (Phase 2)
+- **All list filters (quick chips, Status, Level, Batch) are consolidated into a single "Filter" button** that opens a panel with every filter in one place, instead of a permanently-visible filter bar. The button highlights when any filter is active.
+- **Level, Branch, Guardian, and Status columns removed from the students table**, along with the "Contact sheet" export button (and its now-unused `contactSheet()` service function).
+- **Row-level View/Edit/Archive/Delete buttons removed from the table** — the row itself already opens the profile.
+- **The profile drawer's Operations row** (Move batch/Place in batch, Collect fee, Promote, Status, Issue certificate) **moved to directly under the header**, above the tabs, and recoloured orange (new `.btn-warning` style in `components.css`).
+- **Archive moved out of the Operations row into the drawer's footer**, alongside Close/Edit, with Delete added beside it. Archive automatically becomes "Restore Student" for an already-archived student (and back to Archive once restored, on next open).
+
+### Changed — Admissions (Phase 3)
+- **The wizard is now 5 steps instead of 9**: Applicant and Parent are merged into one "Applicant" step; Placement and Batch are merged into one "Placement" step (the batch list now reacts live if level or branch is changed on this same combined step, not just once on entry); Medical and Documents steps are removed outright, with no replacement — NATYAM does not collect either.
+- `ADMISSION_STEPS` (`admissions.service.js`) updated to match; its per-step validation moved with the merged fields.
+- The Drafts list's "step X of N" caption is clamped so an older, in-flight draft saved under the previous 9-step numbering never displays a step count past the new total. (The wizard itself always resumes from step 1 with prior answers pre-filled — it never used the stored step index to jump to a position — so no functional resume behaviour needed migrating, only this display.)
+
+### Changed — Parents (Phase 4)
+- **Removed**: the "Export directory" button (and its now-unused `exportDirectory()` method), the "No phone number" quick filter, and the "With siblings" / "Unreachable" KPI tiles. Households and Owing remain.
+
+---
+
 ## [2.20.0] — 2026-07-28 — Milestone B2: Restore the Old Attendance Screen
 
 At the user's direct request: Attendance is removed from the sidebar again (reached only from Timetable's "Take register" and the existing Dashboard/Batches/search shortcuts), and the page itself is restored to its pre-grid design — a day board of batch cards, and a single-day roll call with Present/Absent toggles and one Save button, rather than the Week/Month/Custom-Range grid it had become.

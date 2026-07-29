@@ -30,7 +30,7 @@ import { session } from '../core/session.js';
 import { localDate, nowISO, addDays, daysBetween, monthKey, dayName, startOfMonth, endOfMonth, lastMonths } from '../utils/date.js';
 import { ATTENDANCE_STATUS } from '../config/app.config.js';
 import { attendance$, students$, batches$, staff$, AttendanceMath } from '../data/repositories.js';
-import { isScheduledClassDay, resolveSession, completeSession } from './session.service.js';
+import { isScheduledClassDay, resolveSession, completeSession, sessionStatusOf } from './session.service.js';
 
 /* ==========================================================================
    PREPARING A REGISTER
@@ -45,9 +45,10 @@ import { isScheduledClassDay, resolveSession, completeSession } from './session.
 export async function openRegister(batchId, date = localDate()) {
     const batch = await batches$.findOrFail(batchId);
 
-    const [roster, existing] = await Promise.all([
+    const [roster, existing, sessionStatus] = await Promise.all([
         students$.byBatch(batchId),
-        attendance$.forBatchOn(batchId, date)
+        attendance$.forBatchOn(batchId, date),
+        sessionStatusOf(batchId, date)
     ]);
 
     const marked = new Map(existing.map((row) => [row.studentId, row]));
@@ -70,6 +71,7 @@ export async function openRegister(batchId, date = localDate()) {
         date,
         dayName: dayName(date),
         scheduled: isScheduledClassDay(batch, date),
+        sessionStatus,
         alreadyMarked: existing.length > 0,
         markedAt: existing[0]?.updatedAt || null,
         entries,

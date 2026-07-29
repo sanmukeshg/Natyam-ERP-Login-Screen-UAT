@@ -21,12 +21,10 @@ import { toast } from '../../ui/toast.js';
 import { drawer } from '../../ui/overlay.js';
 import { DataTable } from '../../ui/table.js';
 import { formOverlay, summaryList } from '../../ui/form.js';
-import { downloadCSV } from '../../utils/csv.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatMoney, formatNumber } from '../../utils/money.js';
-import { localDate } from '../../utils/date.js';
 import { households, householdSummary, updateStudent } from '../../services/students.service.js';
 
 export default class ParentsPage extends Page {
@@ -52,11 +50,6 @@ export default class ParentsPage extends Page {
                     <h1 class="page-title">Parents</h1>
                     <p class="page-subtitle">Households, derived from the contact number on each student record.</p>
                 </div>
-                <div class="page-actions">
-                    <button class="btn btn-secondary btn-sm" data-action="export">
-                        ${raw(icon('download', { size: 15 }))} Export directory
-                    </button>
-                </div>
             </header>
             <div class="page-body">
                 <div data-role="summary"></div>
@@ -66,7 +59,6 @@ export default class ParentsPage extends Page {
                             { key: '', label: 'All households' },
                             { key: 'siblings', label: 'More than one child' },
                             { key: 'owing', label: 'Owing fees' },
-                            { key: 'uncontactable', label: 'No phone number' },
                             { key: 'no-email', label: 'No email' }
                         ].map((chip) => html`
                             <button class="btn btn-sm ${this.filter === chip.key ? 'btn-primary' : 'btn-secondary'}"
@@ -92,8 +84,6 @@ export default class ParentsPage extends Page {
             });
             this.apply();
         }));
-        this.onDispose(on(this.container, 'click', '[data-action="export"]', () => this.exportDirectory()));
-
         [EVENTS.STUDENT_CREATED, EVENTS.STUDENT_UPDATED, EVENTS.BRANCH_CHANGED]
             .forEach((event) => this.events.on(event, () => this.load()));
     }
@@ -169,11 +159,8 @@ export default class ParentsPage extends Page {
 
     summaryRow(stats) {
         return html`
-            <div class="grid grid-4">
+            <div class="grid grid-2">
                 ${kpiCard('Households', formatNumber(stats.households))}
-                ${kpiCard('With siblings', formatNumber(stats.multiChild), 'a discount conversation waiting to happen')}
-                ${kpiCard('Unreachable', formatNumber(stats.missingPhone),
-                    stats.missingPhone ? 'no phone number on file' : 'everyone can be reached', { tone: stats.missingPhone ? 'negative' : 'positive' })}
                 ${kpiCard('Owing', formatMoney(stats.totalOutstanding), `${stats.owing} households`, { tone: stats.totalOutstanding ? 'caution' : 'positive' })}
             </div>
         `;
@@ -184,7 +171,6 @@ export default class ParentsPage extends Page {
             switch (this.filter) {
                 case 'siblings': return group.size > 1;
                 case 'owing': return group.outstanding > 0;
-                case 'uncontactable': return !group.contactable;
                 case 'no-email': return !group.email;
                 default: return true;
             }
@@ -310,21 +296,5 @@ export default class ParentsPage extends Page {
         }
     }
 
-    exportDirectory() {
-        const rows = this.table.processed.map((group) => ({
-            Guardian: group.guardianName,
-            Relationship: group.guardianRelation,
-            Phone: group.phone || '',
-            Email: group.email || '',
-            'Emergency contact': group.alternatePhone || '',
-            Children: group.children.map((c) => c.name).join('; '),
-            'Children count': group.size,
-            Outstanding: group.outstanding / 100,
-            Address: group.address || ''
-        }));
-
-        downloadCSV(`natyam-parents-${localDate()}`, rows);
-        toast.success(`${rows.length} households exported.`);
-    }
 }
 

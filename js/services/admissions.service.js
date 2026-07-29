@@ -33,14 +33,13 @@ import { notify } from './notifications.service.js';
    ========================================================================== */
 
 export const ADMISSION_STEPS = Object.freeze([
-    { key: 'applicant',  label: 'Applicant',   required: ['name', 'dateOfBirth', 'gender'] },
-    { key: 'guardian',   label: 'Parent',      required: ['guardianName', 'guardianRelation', 'guardianPhone'] },
+    // Milestone: Applicant+Parent merged into one step, and Placement+Batch
+    // merged into one step; Medical and Documents removed outright — NATYAM
+    // does not collect either, with no replacement planned.
+    { key: 'applicant',  label: 'Applicant',   required: ['name', 'dateOfBirth', 'gender', 'guardianName', 'guardianRelation', 'guardianPhone'] },
     { key: 'placement',  label: 'Placement',   required: ['branchId', 'level'] },
-    { key: 'batch',      label: 'Batch',       required: [] },
     { key: 'experience', label: 'Experience',  required: [] },
-    { key: 'medical',    label: 'Medical',     required: [] },
     { key: 'fees',       label: 'Fee plan',    required: ['feePlanId'] },
-    { key: 'documents',  label: 'Documents',   required: [] },
     { key: 'review',     label: 'Confirm',     required: [] }
 ]);
 
@@ -84,11 +83,11 @@ export function validateStep(stepKey, data) {
         }
     }
 
-    if (stepKey === 'guardian' && data.guardianPhone) {
+    if (stepKey === 'applicant' && data.guardianPhone) {
         const digits = String(data.guardianPhone).replace(/\D/g, '');
         if (digits.length < 10) errors.guardianPhone = 'A contact number needs at least 10 digits.';
     }
-    if (stepKey === 'guardian' && data.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.guardianEmail)) {
+    if (stepKey === 'applicant' && data.guardianEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(data.guardianEmail)) {
         errors.guardianEmail = 'That email address does not look right.';
     }
 

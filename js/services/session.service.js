@@ -35,6 +35,19 @@ export function isScheduledClassDay(batch, date) {
     return (batch.days || []).includes(dayCode);
 }
 
+/**
+ * Read-only status check for a batch+date's Session, if one already exists —
+ * never lazily schedules one (unlike resolveSession(), which is only right to
+ * call at the moment attendance is actually being posted). Lets Attendance
+ * know whether a session here is already Postponed/Cancelled — e.g. to hide
+ * its own Postpone/Cancel controls for a slot that's already in one of those
+ * states — without ever reading the classSessions collection itself.
+ */
+export async function sessionStatusOf(batchId, date) {
+    const existing = await classSessions$.findByBatchDate(batchId, date);
+    return existing?.status || null;
+}
+
 function minutesBetween(startTime, endTime) {
     const [sh, sm] = startTime.split(':').map(Number);
     const [eh, em] = endTime.split(':').map(Number);
