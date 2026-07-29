@@ -1,3 +1,30 @@
+# Release Notes — NATYAM ERP v2.22.0
+
+**Release:** Bug fixes from "New Bugs 2.21.0"
+**Date:** 29 July 2026
+**Baseline:** v2.21.0
+**Type:** Bug fixes — seven issues found in real use of the previous release.
+
+## What changed for the academy
+
+- **Admissions**: the "Parent or guardian" section now has a proper heading; resuming a saved application (or clicking Back mid-form) no longer shows blank fields; "Previous teacher" and "Notes" are gone from the Experience step.
+- **Students**: the row of action buttons at the top of a student's profile no longer overlaps the tabs below it, and now matches the Edit button's color.
+- **Attendance**: the "Back" button now genuinely goes back to wherever you came from (Timetable, Dashboard, wherever) instead of always landing on the day board.
+- **Timetable**: a postponed class no longer shows twice — only on its new date, in yellow until marked, green once it is. Cancelled classes now show clearly in red. Opening a rescheduled class's register tells you which date it was moved from.
+- **Settings**: the app version is now shown on the Institute tab.
+
+## For administrators / IT
+
+- No `firestore.rules` change and no data migration — all seven are application-layer fixes.
+- No manual step required.
+
+## Quality
+
+- Static analysis clean: no import cycles, all imports resolve, no undefined identifiers, no new dead code.
+- Verified by direct code tracing (interactive browser testing wasn't available this round) — recommend a real click-through of Admissions (new + resumed application), a student profile, and a postpone/cancel on Timetable before considering this fully signed off.
+
+---
+
 # Release Notes — NATYAM ERP v2.21.0
 
 **Release:** Enhancement Round — Timetable/Attendance, Students, Admissions, Parents

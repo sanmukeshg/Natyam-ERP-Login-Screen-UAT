@@ -42,10 +42,23 @@ export function isScheduledClassDay(batch, date) {
  * know whether a session here is already Postponed/Cancelled — e.g. to hide
  * its own Postpone/Cancel controls for a slot that's already in one of those
  * states — without ever reading the classSessions collection itself.
+ *
+ * Also resolves `postponedFrom`: when this session is itself a Replacement
+ * (it carries an `originalSessionId`), the original's own date — so the
+ * register can say plainly where this class was moved from, rather than
+ * just showing up on a day the batch doesn't normally meet with no context.
  */
 export async function sessionStatusOf(batchId, date) {
     const existing = await classSessions$.findByBatchDate(batchId, date);
-    return existing?.status || null;
+    if (!existing) return { status: null, postponedFrom: null };
+
+    let postponedFrom = null;
+    if (existing.originalSessionId) {
+        const original = await classSessions$.find(existing.originalSessionId);
+        postponedFrom = original?.date || null;
+    }
+
+    return { status: existing.status || null, postponedFrom };
 }
 
 function minutesBetween(startTime, endTime) {

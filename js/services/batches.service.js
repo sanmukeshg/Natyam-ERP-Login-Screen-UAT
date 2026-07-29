@@ -327,30 +327,41 @@ export async function timetable(branchId = null) {
             .map((s) => byId.get(s.batchId))
             .filter(Boolean);
 
-        const slots = [...recurring, ...extra].map((b) => {
-            const classSession = sessions.get(`${b.id}|${date}`);
-            // A Replacement session can carry its own time and teacher,
-            // different from the batch's usual schedule — that's the
-            // whole point of postponing to it. Fall back to the batch's
-            // normal values for an ordinary, untouched occurrence.
-            const startTime = classSession?.startTime || b.startTime;
-            const endTime = classSession?.endTime || b.endTime;
-            const teacherId = classSession?.teacherId || b.teacherId;
+        const slots = [...recurring, ...extra]
+            .map((b) => {
+                const classSession = sessions.get(`${b.id}|${date}`);
+                // A Replacement session can carry its own time and teacher,
+                // different from the batch's usual schedule — that's the
+                // whole point of postponing to it. Fall back to the batch's
+                // normal values for an ordinary, untouched occurrence.
+                const startTime = classSession?.startTime || b.startTime;
+                const endTime = classSession?.endTime || b.endTime;
+                const teacherId = classSession?.teacherId || b.teacherId;
 
-            return {
-                ...b,
-                date,
-                startTime,
-                endTime,
-                teacherId,
-                teacherName: teacherName.get(teacherId) || 'Unassigned',
-                levelLabel: levelsLabel(levelsOf(b)),
-                registerMarked: markedSet.has(`${b.id}|${date}`),
-                sessionId: classSession?.id || null,
-                sessionStatus: classSession?.status || 'scheduled',
-                replacementSessionId: classSession?.replacementSessionId || null
-            };
-        });
+                return {
+                    ...b,
+                    date,
+                    startTime,
+                    endTime,
+                    teacherId,
+                    teacherName: teacherName.get(teacherId) || 'Unassigned',
+                    levelLabel: levelsLabel(levelsOf(b)),
+                    registerMarked: markedSet.has(`${b.id}|${date}`),
+                    sessionId: classSession?.id || null,
+                    sessionStatus: classSession?.status || 'scheduled',
+                    replacementSessionId: classSession?.replacementSessionId || null,
+                    // True for the slot a postponed class was moved *to* —
+                    // lets the page show it as pending (not yet an ordinary
+                    // untouched class) until its register is actually marked.
+                    isReplacement: Boolean(classSession?.originalSessionId)
+                };
+            })
+            // A postponed original stays a real record (its own register can
+            // never be marked against it again — postRegister() already
+            // refuses that), but it has no business still occupying its old
+            // day visually once a replacement exists; only the replacement's
+            // own date should show anything for this occurrence.
+            .filter((entry) => entry.sessionStatus !== 'postponed');
 
         return {
             day,

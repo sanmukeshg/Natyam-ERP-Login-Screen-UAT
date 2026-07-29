@@ -31,7 +31,7 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatMoney, formatNumber } from '../../utils/money.js';
 import { formatDate, formatDateTime, relativeTime, localDate } from '../../utils/date.js';
-import { STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY } from '../../config/app.config.js';
+import { APP, STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY } from '../../config/app.config.js';
 
 import {
     institute, updateInstitute, listBranches, createBranch, updateBranch, closeBranch,
@@ -255,6 +255,17 @@ export default class SettingsPage extends Page {
                             </div>
                         ` : ''}
                     ` : html`<p class="type-caption type-muted">No academic year set.</p>`}
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h2 class="card-title">About this app</h2></div>
+                <div class="card-body">
+                    ${summaryList([
+                        ['App', APP.name],
+                        ['Version', APP.version],
+                        ['Organisation', APP.organisation]
+                    ])}
                 </div>
             </div>
         `;

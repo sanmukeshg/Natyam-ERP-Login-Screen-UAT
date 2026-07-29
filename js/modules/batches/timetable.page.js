@@ -22,8 +22,7 @@ import { formatNumber } from '../../utils/money.js';
 import { timetable } from '../../services/batches.service.js';
 import { listStaff } from '../../services/staff.service.js';
 
-const STATUS_TONE = { postponed: 'muted', cancelled: 'negative' };
-const STATUS_LABEL = { postponed: 'Postponed', cancelled: 'Cancelled' };
+const STATUS_LABEL = { cancelled: 'Cancelled' };
 
 export default class TimetablePage extends Page {
     constructor(context) {
@@ -137,11 +136,14 @@ export default class TimetablePage extends Page {
                             ${day.sessions.length ? html`
                                 <ul class="stack stack-sm">
                                     ${day.sessions.map((entry) => {
-                                        const inactive = entry.sessionStatus === 'postponed' || entry.sessionStatus === 'cancelled';
+                                        const cancelled = entry.sessionStatus === 'cancelled';
+                                        const pending = entry.isReplacement && !entry.registerMarked;
+                                        const tone = cancelled ? 'negative'
+                                            : entry.registerMarked ? 'positive'
+                                            : pending ? 'caution' : '';
                                         return html`
                                         <li>
-                                            <div class="timetable-slot"
-                                                 data-tone="${inactive ? STATUS_TONE[entry.sessionStatus] : (entry.registerMarked ? 'positive' : '')}">
+                                            <div class="timetable-slot" data-tone="${tone}">
                                                 <button class="timetable-slot-main" data-batch="${entry.id}" data-date="${entry.date}">
                                                     <span class="timetable-time">
                                                         ${entry.startTime}–${entry.endTime}
@@ -151,10 +153,10 @@ export default class TimetablePage extends Page {
                                                         ${entry.levelLabel} · ${entry.teacherName}
                                                         ${entry.room ? `· ${entry.room}` : ''}
                                                     </span>
-                                                    ${inactive ? html`
-                                                        <span class="badge ${entry.sessionStatus === 'cancelled' ? 'badge-danger' : 'badge-neutral'}">
-                                                            ${STATUS_LABEL[entry.sessionStatus]}
-                                                        </span>
+                                                    ${cancelled ? html`
+                                                        <span class="badge badge-danger">${STATUS_LABEL.cancelled}</span>
+                                                    ` : pending ? html`
+                                                        <span class="badge badge-warning">Rescheduled</span>
                                                     ` : ''}
                                                 </button>
                                             </div>

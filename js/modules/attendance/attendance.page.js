@@ -29,7 +29,8 @@
  * Likewise no Leave workflow — NATYAM has no Leave concept (Milestone 6).
  */
 
-import { Page } from '../../core/router.js';
+import { Page, router } from '../../core/router.js';
+import { previousPath } from '../../core/navHistory.js';
 import { html, render, raw, on } from '../../utils/dom.js';
 import { icon } from '../../ui/icons.js';
 import { toast } from '../../ui/toast.js';
@@ -117,8 +118,9 @@ export default class AttendancePage extends Page {
         this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
             this.openBatchRegister(target.dataset.openBatch)));
         this.onDispose(on(this.container, 'click', '[data-action="back"]', () => {
-            this.batchId = null;
-            this.loadBoard();
+            const back = previousPath();
+            if (back) router.go(back);
+            else router.go('/timetable');
         }));
         this.onDispose(on(this.container, 'click', '[data-postpone]', (event, target) => {
             event.stopPropagation();
@@ -390,7 +392,7 @@ export default class AttendancePage extends Page {
         render(body, html`
             <div class="row row-wrap">
                 <button class="btn btn-sm btn-ghost" data-action="back">
-                    ${raw(icon('arrow-left', { size: 15 }))} All registers
+                    ${raw(icon('arrow-left', { size: 15 }))} Back
                 </button>
             </div>
 
@@ -401,10 +403,9 @@ export default class AttendancePage extends Page {
                 </div>
             ` : ''}
 
-            ${!reg.scheduled ? html`
-                <div class="alert alert-warning">
-                    <p class="alert-body">${reg.batch.name} does not normally meet on a ${reg.dayName}.
-                    You can still mark a make-up class.</p>
+            ${reg.postponedFrom ? html`
+                <div class="alert alert-info">
+                    <p class="alert-body">This class was postponed from ${formatDate(reg.postponedFrom)}.</p>
                 </div>
             ` : ''}
 

@@ -505,13 +505,13 @@ export default class StudentsPage extends Page {
                     <div class="profile-ops">
                         <span class="profile-ops-label">Operations</span>
                         <div class="profile-ops-row">
-                            <button class="btn btn-sm btn-warning" data-profile-action="assign">
+                            <button class="btn btn-sm btn-primary" data-profile-action="assign">
                                 ${data.student.batchId ? 'Move batch' : 'Place in batch'}</button>
                             ${session.can('fee.collect')
-                                ? html`<button class="btn btn-sm btn-warning" data-profile-action="collect">Collect fee</button>` : ''}
-                            <button class="btn btn-sm btn-warning" data-profile-action="promote">Promote</button>
-                            <button class="btn btn-sm btn-warning" data-profile-action="status">Status</button>
-                            <button class="btn btn-sm btn-warning" data-profile-action="certificate">Issue certificate</button>
+                                ? html`<button class="btn btn-sm btn-primary" data-profile-action="collect">Collect fee</button>` : ''}
+                            <button class="btn btn-sm btn-primary" data-profile-action="promote">Promote</button>
+                            <button class="btn btn-sm btn-primary" data-profile-action="status">Status</button>
+                            <button class="btn btn-sm btn-primary" data-profile-action="certificate">Issue certificate</button>
                         </div>
                     </div>
                 ` : ''}

@@ -128,6 +128,10 @@
 
 /* Green once the register for that session's date has been taken. */
 .timetable-slot[data-tone="positive"] { border-left-color: var(--success-500); background: var(--success-50); }
+/* Red for a cancelled class — never has a register, never will. */
+.timetable-slot[data-tone="negative"] { border-left-color: var(--danger-500); background: var(--danger-50); }
+/* Yellow for a postponed class's replacement slot, until its register is marked. */
+.timetable-slot[data-tone="caution"]  { border-left-color: var(--warning-500); background: var(--warning-50); }
 
 .timetable-slot-main {
     display: block;
@@ -667,9 +671,9 @@
 
 /* Student profile operations — every action visible, none behind a menu. */
 .profile-ops {
-    margin-top: var(--space-4);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--border-subtle);
+    margin-bottom: var(--space-4);
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
 }
 .profile-ops-label {
     display: block;

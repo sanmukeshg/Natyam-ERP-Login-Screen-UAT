@@ -9,6 +9,30 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.22.0] — 2026-07-29 — Bug fixes from "New Bugs 2.21.0"
+
+Seven fixes found in real use of v2.21.0's changes, from a new document with six screenshots. All verified by code tracing (no interactive browser session available this round).
+
+### Fixed
+- **Admissions — "Parent or guardian" now has a real heading**, equal in weight to "Applicant", instead of the thin divider label it had after the two steps were merged.
+- **Admissions — resumed drafts (and Back navigation) no longer show blank fields.** Root cause: the wizard framework passes the in-progress `data` into each step's `fields(data)` function specifically so fields can be pre-filled, but the Applicant/Experience/Fees steps never used it — a pre-existing gap, not something the step-merge introduced, just not noticed until now. Fixed by wiring `value: data.<field>` through on all three steps (Placement and Review already did this correctly).
+- **Admissions — "Previous teacher" and "Notes" removed from the Experience step.**
+- **Students — the Operations row no longer crowds the tabs below it.** `.profile-ops`'s spacing was still set up for when it sat *below* the tabs (its old position); swapped to bottom spacing now that it sits above them. Its buttons now match the Edit button's color exactly (switched to the same `.btn-primary` class, removing the separate orange `.btn-warning` style added last round).
+- **Attendance — "Back" is now a real smart-back**, not a fixed destination: it returns to whichever screen you actually came from (a new, small `js/core/navHistory.js` tracks the one previous route), falling back to Timetable only when there's nothing to return to (e.g. after a page reload).
+- **Timetable — postponed/cancelled sessions now behave and look right:**
+  - A postponed class's original slot no longer lingers on its old day — it only ever appears on the date it was actually moved to.
+  - That new slot now shows yellow until its register is marked (green, as before, once it is) — previously it looked like any other untouched class, with no way to tell it was a reschedule.
+  - Cancelled classes now render with a red-tinted card (the tone existed in the code already but had no matching CSS, so it never actually showed).
+  - Opening a rescheduled class's register now says which date it was postponed from.
+- **Settings — app version is now shown** on the Institute tab (name, version, organisation) — confirmed nothing like this existed anywhere in Settings before.
+
+### Technical
+- `batches.service.js#timetable()`: postponed originals are filtered out of their day's slot list entirely; every entry now carries `isReplacement`.
+- `session.service.js#sessionStatusOf()`: now also resolves `postponedFrom` (the original session's date) alongside status, for the one caller (`attendance.service.js#openRegister()`) that needed it.
+- New `js/core/navHistory.js`: a minimal, in-memory, one-entry "previous route" tracker fed by the router's existing `route:done` event — no change to the shared `Router` class itself.
+
+---
+
 ## [2.21.0] — 2026-07-29 — Enhancement Round: Timetable/Attendance, Students, Admissions, Parents
 
 Approved changes from the "New Updates in all the modules" document, implemented in four phases (Timetable/Attendance → Students → Admissions → Parents), each verified before the next began. Two pre-existing bugs, found while cross-checking the document's screenshots against the Attendance screen shipped in Milestone B2, were fixed as part of Phase 1.

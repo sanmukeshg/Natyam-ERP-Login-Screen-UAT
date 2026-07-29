@@ -281,6 +281,13 @@ export default class AdmissionsPage extends Page {
         return [
             step('applicant', {
                 description: 'Who is applying, and the parent or guardian we contact.',
+                // fields() still declares every field so the wizard's absorb()
+                // knows what to read on every keystroke; render() (below) is
+                // what actually draws them, with explicit values — needed
+                // both to give "Parent or guardian" a real heading (equal to
+                // "Applicant" itself, not the thin divider style) and so a
+                // resumed draft or a Back navigation shows what was already
+                // filled in, not a blank form.
                 fields: () => [
                     { name: 'name', label: 'Full name', required: true, width: 'half', autofocus: true },
                     { name: 'dateOfBirth', label: 'Date of birth', type: 'date', required: true, width: 'half' },
@@ -294,7 +301,6 @@ export default class AdmissionsPage extends Page {
                     },
                     { name: 'school', label: 'School or college', width: 'half' },
                     { name: 'address', label: 'Address', type: 'textarea', rows: 2 },
-                    { type: 'divider', label: 'Parent or guardian' },
                     { name: 'guardianName', label: 'Name', required: true, width: 'half' },
                     {
                         name: 'guardianRelation', label: 'Relationship', type: 'select', required: true,
@@ -306,7 +312,38 @@ export default class AdmissionsPage extends Page {
                     { name: 'alternatePhone', label: 'Emergency contact', type: 'tel', width: 'half',
                       hint: 'Used when the first number cannot be reached.' },
                     { name: 'occupation', label: 'Occupation', width: 'half' }
-                ]
+                ],
+                render: (data) => html`
+                    ${renderFields([
+                        { name: 'name', label: 'Full name', required: true, width: 'half', autofocus: true, value: data.name },
+                        { name: 'dateOfBirth', label: 'Date of birth', type: 'date', required: true, width: 'half', value: data.dateOfBirth },
+                        {
+                            name: 'gender', label: 'Gender', type: 'select', required: true, width: 'half',
+                            value: data.gender,
+                            options: [
+                                { value: 'female', label: 'Female' },
+                                { value: 'male', label: 'Male' },
+                                { value: 'other', label: 'Other' }
+                            ]
+                        },
+                        { name: 'school', label: 'School or college', width: 'half', value: data.school },
+                        { name: 'address', label: 'Address', type: 'textarea', rows: 2, value: data.address }
+                    ])}
+                    <h3 class="form-section-title mt-4">Parent or guardian</h3>
+                    ${renderFields([
+                        { name: 'guardianName', label: 'Name', required: true, width: 'half', value: data.guardianName },
+                        {
+                            name: 'guardianRelation', label: 'Relationship', type: 'select', required: true,
+                            width: 'half', placeholder: false, value: data.guardianRelation,
+                            options: ['Mother', 'Father', 'Grandparent', 'Guardian'].map((r) => ({ value: r, label: r }))
+                        },
+                        { name: 'guardianPhone', label: 'Phone', type: 'tel', required: true, width: 'half', value: data.guardianPhone },
+                        { name: 'guardianEmail', label: 'Email', type: 'email', width: 'half', value: data.guardianEmail },
+                        { name: 'alternatePhone', label: 'Emergency contact', type: 'tel', width: 'half',
+                          value: data.alternatePhone, hint: 'Used when the first number cannot be reached.' },
+                        { name: 'occupation', label: 'Occupation', width: 'half', value: data.occupation }
+                    ])}
+                `
             }),
             step('placement', {
                 description: 'Where they will study, at what level, and — optionally — which batch.',
@@ -392,9 +429,10 @@ export default class AdmissionsPage extends Page {
             }),
             step('experience', {
                 description: 'Any dance the applicant has already done.',
-                fields: () => [
+                fields: (data) => [
                     {
                         name: 'priorExperience', label: 'Previous training', type: 'select',
+                        value: data.priorExperience,
                         options: [
                             { value: 'none', label: 'None — complete beginner' },
                             { value: 'kuchipudi', label: 'Kuchipudi elsewhere' },
@@ -403,16 +441,15 @@ export default class AdmissionsPage extends Page {
                             { value: 'other', label: 'Other dance' }
                         ]
                     },
-                    { name: 'yearsOfPractice', label: 'Years of practice', type: 'number', min: 0, max: 40, width: 'half' },
-                    { name: 'previousGuru', label: 'Previous teacher', width: 'half' },
-                    { name: 'experienceNotes', label: 'Notes', type: 'textarea', rows: 2 }
+                    { name: 'yearsOfPractice', label: 'Years of practice', type: 'number', min: 0, max: 40, width: 'half',
+                      value: data.yearsOfPractice }
                 ]
             }),
             step('fees', {
                 description: 'The plan this applicant will be billed on.',
-                fields: () => [
-                    { name: 'feePlanId', label: 'Fee plan', type: 'select', required: true, options: planOptions },
-                    { name: 'feeNotes', label: 'Concession or note', type: 'textarea', rows: 2,
+                fields: (data) => [
+                    { name: 'feePlanId', label: 'Fee plan', type: 'select', required: true, value: data.feePlanId, options: planOptions },
+                    { name: 'feeNotes', label: 'Concession or note', type: 'textarea', rows: 2, value: data.feeNotes,
                       hint: 'Any agreed discount is applied when the invoice is raised, not here.' }
                 ]
             }),

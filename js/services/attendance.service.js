@@ -45,7 +45,7 @@ import { isScheduledClassDay, resolveSession, completeSession, sessionStatusOf }
 export async function openRegister(batchId, date = localDate()) {
     const batch = await batches$.findOrFail(batchId);
 
-    const [roster, existing, sessionStatus] = await Promise.all([
+    const [roster, existing, sessionInfo] = await Promise.all([
         students$.byBatch(batchId),
         attendance$.forBatchOn(batchId, date),
         sessionStatusOf(batchId, date)
@@ -71,7 +71,8 @@ export async function openRegister(batchId, date = localDate()) {
         date,
         dayName: dayName(date),
         scheduled: isScheduledClassDay(batch, date),
-        sessionStatus,
+        sessionStatus: sessionInfo.status,
+        postponedFrom: sessionInfo.postponedFrom,
         alreadyMarked: existing.length > 0,
         markedAt: existing[0]?.updatedAt || null,
         entries,
