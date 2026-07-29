@@ -9,6 +9,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.20.0] — 2026-07-28 — Milestone B2: Restore the Old Attendance Screen
+
+At the user's direct request: Attendance is removed from the sidebar again (reached only from Timetable's "Take register" and the existing Dashboard/Batches/search shortcuts), and the page itself is restored to its pre-grid design — a day board of batch cards, and a single-day roll call with Present/Absent toggles and one Save button, rather than the Week/Month/Custom-Range grid it had become.
+
+### Changed
+- **`app.config.js`**: the `/attendance` NAVIGATION entry gets `hidden: true` — reusing an already-existing, previously-unused mechanism in `shell.js`'s `paintNav()` (`!item.hidden`) that keeps a route registered (`ROUTES` is derived from `NAVIGATION`) without rendering it as a sidebar item. No change needed anywhere else — Timetable's "Take register" already passed `?batch=&date=`, and Postpone/Cancel (Milestone 7) are a fully separate, untouched code path.
+- **`js/modules/attendance/attendance.page.js`**: rebuilt on the exact structure of the pre-grid version (recovered from git history, commit `c0c94d3`), re-wired to the current service layer — `openRegister()`'s `scheduled` field (renamed from `meetsToday`), and a direct `holidays$.on()` call for the holiday banner (mirroring `dashboard.service.js`'s own pattern), since holiday-checking was deliberately moved out of `attendance.service.js` itself back in Milestone 6.
+- **`attendance.service.js#openRegister()`** now includes `medicalNotes` on each entry, restoring the roll-call row's "· medical note" indicator using data that was already tracked on the student record but not previously exposed here.
+- **`weeklyGrid()`/`customRangeGrid()` removed** from `attendance.service.js` — they existed only to serve the grid page's Week/Custom-Range tabs, which no longer exist; confirmed no other caller anywhere in the codebase before deleting.
+
+### Not restored (deliberately)
+- **"Declare holiday"** — no live write path exists anywhere in the app; holidays are read-only, populated only by a historical migration.
+- **The Leave workflow** — NATYAM has no Leave concept, stated outright in this service's own header comment; confirmed nothing in the current codebase references the old Leave helpers.
+
+---
+
 ## [2.19.0] — 2026-07-28 — Milestone B1: Multi-Level Batches
 
 A batch used to teach exactly one level, enforced hard everywhere a student was placed into one — but a single class often genuinely mixes students across two or three adjacent levels. A batch now teaches a *set* of levels.

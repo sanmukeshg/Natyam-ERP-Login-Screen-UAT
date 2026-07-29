@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.19.0',
+    version: '2.20.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -591,10 +591,15 @@ export const NAVIGATION = Object.freeze([
               load: () => import('../modules/batches/batches.page.js') },
             { path: '/timetable', label: 'Timetable', icon: 'calendar', cap: CAPABILITIES.STUDENT_VIEW,
               load: () => import('../modules/batches/timetable.page.js') },
-            // Restored to the sidebar (Milestone 6) — still reachable from
-            // Timetable's "Take register" too, both routes to the same page.
+            // Milestone B2 (2026-07-28): removed from the sidebar again —
+            // reached only from Timetable's "Take register" (and the
+            // handful of other existing shortcuts: Dashboard, Batches'
+            // detail drawer, command search). `hidden: true` keeps this in
+            // NAVIGATION (and therefore in ROUTES, derived from it below)
+            // without shell.js's paintNav() rendering it as a menu item —
+            // the route and the page stay fully functional either way.
             { path: '/attendance', label: 'Attendance', icon: 'check-square', cap: CAPABILITIES.ATTENDANCE_VIEW,
-              load: () => import('../modules/attendance/attendance.page.js') },
+              hidden: true, load: () => import('../modules/attendance/attendance.page.js') },
             { path: '/programs', label: 'Programmes', icon: 'star', cap: CAPABILITIES.PROGRAM_VIEW,
               load: () => import('../modules/programs/programs.page.js') },
             { path: '/certificates', label: 'Certificates', icon: 'award', cap: CAPABILITIES.PROGRAM_VIEW,

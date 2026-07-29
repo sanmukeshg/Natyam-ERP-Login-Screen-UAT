@@ -27,7 +27,7 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { localDate, nowISO, addDays, daysBetween, monthKey, dayName, startOfMonth, endOfMonth, lastMonths, startOfWeek } from '../utils/date.js';
+import { localDate, nowISO, addDays, daysBetween, monthKey, dayName, startOfMonth, endOfMonth, lastMonths } from '../utils/date.js';
 import { ATTENDANCE_STATUS } from '../config/app.config.js';
 import { attendance$, students$, batches$, staff$, AttendanceMath } from '../data/repositories.js';
 import { isScheduledClassDay, resolveSession, completeSession } from './session.service.js';
@@ -59,6 +59,7 @@ export async function openRegister(batchId, date = localDate()) {
             name: student.name,
             admissionNo: student.admissionNo,
             photo: student.photo || null,
+            medicalNotes: student.medicalNotes || null,
             status: prior?.status || ATTENDANCE_STATUS.PRESENT,
             previouslyMarked: Boolean(prior)
         };
@@ -195,71 +196,8 @@ export async function postRegister({ batchId, date, entries }) {
 }
 
 /* ==========================================================================
-   GRIDS — Week (default), Custom Range, Month
+   MONTH GRID
    ========================================================================== */
-
-/** Shared grid-building for one batch across an explicit list of dates — the shape Week View and Custom Range View both need. */
-async function gridFor(batchId, dates) {
-    const [roster, batch] = await Promise.all([students$.byBatch(batchId), batches$.findOrFail(batchId)]);
-
-    if (!dates.length) return { batch, days: [], rows: [] };
-
-    const from = dates[0];
-    const to = dates[dates.length - 1];
-    const rows = (await attendance$.between(from, to)).filter((r) => r.batchId === batchId);
-    const byKey = new Map(rows.map((r) => [`${r.studentId}|${r.date}`, r]));
-
-    return {
-        batch,
-        days: dates.map((date) => ({ date, label: dayName(date, true) })),
-        rows: roster.map((student) => {
-            const cells = dates.map((date) => byKey.get(`${student.id}|${date}`)?.status || null);
-            const present = cells.filter((c) => c === ATTENDANCE_STATUS.PRESENT).length;
-            const total = cells.filter((c) => c !== null).length;
-            return {
-                student,
-                cells,
-                present,
-                total,
-                rate: total ? Math.round((present / total) * 100) : null
-            };
-        })
-    };
-}
-
-/**
- * The default view: one Monday-anchored week, one batch, only the days it
- * actually meets as columns, marked directly from the grid.
- */
-export async function weeklyGrid({ batchId, weekStart = null }) {
-    const start = startOfWeek(weekStart ? new Date(`${weekStart}T00:00:00`) : new Date());
-    const batch = await batches$.findOrFail(batchId);
-
-    const dates = [];
-    for (let i = 0; i < 7; i++) {
-        const date = addDays(start, i);
-        if (isScheduledClassDay(batch, date)) dates.push(date);
-    }
-
-    const grid = await gridFor(batchId, dates);
-    return { ...grid, weekStart: start, weekEnd: addDays(start, 6) };
-}
-
-/** Same grid, an explicit From/To range instead of a fixed week. Capped at 3 months so a mistyped range can't fetch a huge scan. */
-export async function customRangeGrid({ batchId, from, to }) {
-    if (!from || !to) throw new Error('Choose both a from and a to date.');
-    if (to < from) throw new Error('The end date cannot be before the start date.');
-    if (daysBetween(from, to) > 92) throw new Error('Choose a range of three months or less.');
-
-    const batch = await batches$.findOrFail(batchId);
-    const dates = [];
-    for (let d = new Date(`${from}T00:00:00`); localDate(d) <= to; d.setDate(d.getDate() + 1)) {
-        const date = localDate(d);
-        if (isScheduledClassDay(batch, date)) dates.push(date);
-    }
-
-    return gridFor(batchId, dates);
-}
 
 /** Attendance for one month, shaped as a calendar grid — unchanged from before this migration. */
 export async function monthlyGrid({ batchId, month = monthKey() }) {

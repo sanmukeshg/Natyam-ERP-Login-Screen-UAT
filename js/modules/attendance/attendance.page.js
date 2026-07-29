@@ -1,437 +1,471 @@
 /**
  * NATYAM ERP 2.0 — Attendance
  *
- * One batch at a time: pick a batch, then view and mark its attendance in
- * Week (default), Custom Range, or Month. Week and Custom Range are marked
- * directly in the grid — click a cell to toggle Present/Absent, then save;
- * Month stays read-only, exactly as it was before this migration.
+ * Milestone B2: restored to its pre-grid design (see git history —
+ * `js/modules/attendance/attendance.page.js` as of commit c0c94d3, before a
+ * Week/Month/Custom-Range grid replaced it) at the user's direct request.
+ * No longer in the sidebar (app.config.js's NAVIGATION marks this route
+ * `hidden: true`) — reached only via Timetable's "Take register" button
+ * (which already passes `?batch=&date=`) and the handful of other existing
+ * shortcuts (Dashboard, Batches' detail drawer, command search).
  *
- * Built for one-handed speed on a phone at the edge of a hall: everybody
- * starts Present, marking is one tap per exception, and saving posts one
- * whole day's roster at a time — postRegister() refuses to leave a class
- * half-marked, whatever this page sends it.
+ * Two screens in one route: the day board (which registers are done, which
+ * are not) and the register itself.
+ *
+ * The register is the most-used screen in the whole ERP — a teacher opens it
+ * on a phone, at the edge of a hall, with thirty children waiting. So it is
+ * built for one-handed speed: everybody starts present, marking is one tap
+ * per exception, and the save is a single atomic post rather than a write
+ * per child. Nothing here decides what a valid mark is; postRegister does,
+ * and it refuses backdating beyond thirty days, and refuses marking a
+ * postponed or cancelled session, whatever this page sends it — surfaced
+ * here as a plain error toast on Save, not pre-empted with its own banner.
+ *
+ * Holiday-checking is deliberately not part of attendance.service.js (see
+ * its own header comment) — this page calls `holidays$.on()` directly,
+ * mirroring dashboard.service.js's own `today()`. There is no "Declare
+ * holiday" action here any more: holidays are read-only, populated only by
+ * a historical migration (no live write path exists anywhere in the app).
+ * Likewise no Leave workflow — NATYAM has no Leave concept (Milestone 6).
  */
 
 import { Page } from '../../core/router.js';
 import { html, render, raw, on } from '../../utils/dom.js';
 import { icon } from '../../ui/icons.js';
 import { toast } from '../../ui/toast.js';
+import { drawer } from '../../ui/overlay.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
-import { formatDate, localDate, addDays, monthKey, formatMonth } from '../../utils/date.js';
+import { formatNumber } from '../../utils/money.js';
+import { formatDate, formatDateLong, localDate, addDays, monthKey, formatMonth } from '../../utils/date.js';
 import { ATTENDANCE_STATUS } from '../../config/app.config.js';
+import { holidays$ } from '../../data/repositories.js';
 
 import {
-    postRegister, weeklyGrid, customRangeGrid, monthlyGrid
+    openRegister, dayBoard, postRegister, monthlyGrid, missingRegisters
 } from '../../services/attendance.service.js';
 import { listBatches } from '../../services/batches.service.js';
 
 const MARKS = [
     { value: ATTENDANCE_STATUS.PRESENT, label: 'Present', short: 'P', tone: 'positive' },
-    { value: ATTENDANCE_STATUS.ABSENT, label: 'Absent', short: 'A', tone: 'negative' }
-];
-
-const TABS = [
-    { key: 'week', label: 'Week' },
-    { key: 'range', label: 'Custom Range' },
-    { key: 'month', label: 'Month' }
+    { value: ATTENDANCE_STATUS.ABSENT, label: 'Absent', short: 'A', tone: 'negative' },
 ];
 
 export default class AttendancePage extends Page {
     constructor(context) {
         super(context);
         this.title = 'Attendance';
+        this.date = this.query.date || localDate();
         this.batchId = this.query.batch || null;
-        // A batch named in the URL (?batch=X, with or without &date=) is
-        // trusted and loads immediately. Arriving with no batch at all
-        // (a bare #/attendance link, e.g. from Notifications or Search) no
-        // longer silently opens whichever batch happens to be first — the
-        // Batch selector is shown empty and attendance only loads once the
-        // person actually picks one.
-        this.batchExplicit = Boolean(this.query.batch);
-        this.tab = 'week';
-        // A batch+date deep link (Dashboard's "Mark", Timetable/Batches'
-        // "Take register") lands on the week containing that date rather
-        // than the current week.
-        this.weekAnchor = this.query.date || localDate();
-        this.rangeFrom = this.query.date || localDate();
-        this.rangeTo = this.query.date || localDate();
-        this.grid = null;
-        this.dirty = new Map(); // date -> Map(studentId -> status), staged edits not yet saved
-        this.batchesLoadFailed = false;
+        this.register = null;
+        this.holiday = null;
     }
 
     async render(container) {
         this.container = container;
-
-        // Not wrapping this used to crash the whole page to the router's
-        // fatal error boundary on any failure here (e.g. Firestore rules
-        // not yet republished for a new collection) — every other page in
-        // this app degrades to a toast and an empty state instead, and
-        // this one now does too.
-        try {
-            this.batches = await listBatches(session.branch());
-        } catch (err) {
-            console.error('Could not load batches for Attendance', err);
-            toast.error(`Could not load batches — ${err.message}`);
-            this.batches = [];
-            this.batchesLoadFailed = true;
-        }
-
-        if (this.batchExplicit) {
-            // Keep the requested batch only if it's actually one of this
-            // branch's — otherwise fall back the same way this deep link
-            // already did before this adjustment (unchanged behaviour for
-            // ?batch=X and ?batch=X&date=Y, per instruction).
-            if (!this.batches.some((b) => b.id === this.batchId)) {
-                this.batchId = this.batches[0]?.id || null;
-            }
-        } else {
-            this.batchId = null;
-        }
-
         render(container, this.shell());
         this.bind();
-        await this.load();
+
+        if (this.batchId) await this.openBatchRegister(this.batchId);
+        else await this.loadBoard();
     }
 
     shell() {
         return html`
             <header class="page-header">
                 <div class="page-header-text">
-                    <h1 class="page-title">Attendance</h1>
-                    <p class="page-subtitle">Weekly by default — switch to a custom range or the month view.</p>
+                    <h1 class="page-title" data-role="title">Attendance</h1>
+                    <p class="page-subtitle" data-role="subtitle">${formatDateLong(this.date)}</p>
                 </div>
                 <div class="page-actions">
-                    <label class="filter-control">
-                        <span class="sr-only">Batch</span>
-                        <select class="select select-sm" data-role="batch">
-                            ${!this.batchId ? html`<option value="" disabled selected>Choose a batch…</option>` : ''}
-                            ${this.batches.map((b) => html`
-                                <option value="${b.id}" ${b.id === this.batchId ? 'selected' : ''}>${b.name}</option>
-                            `)}
-                        </select>
-                    </label>
+                    <div class="row row-tight">
+                        <button class="btn btn-secondary btn-icon btn-sm" data-shift="-1"
+                                aria-label="Previous day">${raw(icon('chevron-left', { size: 15 }))}</button>
+                        <input class="input input-sm" type="date" value="${this.date}" data-role="date"
+                               aria-label="Date">
+                        <button class="btn btn-secondary btn-icon btn-sm" data-shift="1"
+                                aria-label="Next day">${raw(icon('chevron-right', { size: 15 }))}</button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" data-action="month">
+                        ${raw(icon('calendar', { size: 15 }))} Month view
+                    </button>
                 </div>
             </header>
-            <div class="page-body">
-                <div class="tabs" role="tablist">
-                    ${TABS.map((t) => html`
-                        <button class="tab ${t.key === this.tab ? 'is-active' : ''}" role="tab"
-                                aria-selected="${t.key === this.tab}" data-tab="${t.key}">${t.label}</button>
-                    `)}
-                </div>
-                <div data-role="panel"></div>
-            </div>
+            <div class="page-body" data-role="body"></div>
         `;
     }
 
     bind() {
-        this.onDispose(on(this.container, 'change', '[data-role="batch"]', (_e, target) => {
-            this.batchId = target.value;
-            this.dirty.clear();
-            this.load();
+        this.onDispose(on(this.container, 'change', '[data-role="date"]', (_e, target) => {
+            this.date = target.value;
+            this.batchId ? this.openBatchRegister(this.batchId) : this.loadBoard();
         }));
-        this.onDispose(on(this.container, 'click', '[data-tab]', (_e, target) => {
-            if (target.dataset.tab === this.tab) return;
-            this.tab = target.dataset.tab;
-            this.dirty.clear();
-            this.load();
+        this.onDispose(on(this.container, 'click', '[data-shift]', (_e, target) => {
+            this.date = addDays(this.date, Number(target.dataset.shift));
+            const input = this.container.querySelector('[data-role="date"]');
+            if (input) input.value = this.date;
+            this.batchId ? this.openBatchRegister(this.batchId) : this.loadBoard();
         }));
-        this.onDispose(on(this.container, 'click', '[data-week-shift]', (_e, target) => {
-            this.weekAnchor = addDays(this.weekAnchor, Number(target.dataset.weekShift));
-            this.dirty.clear();
-            this.load();
-        }));
-        this.events.on(EVENTS.BRANCH_CHANGED, async () => {
-            try {
-                this.batches = await listBatches(session.branch());
-                this.batchesLoadFailed = false;
-            } catch (err) {
-                console.error('Could not load batches for Attendance', err);
-                toast.error(`Could not load batches — ${err.message}`);
-                this.batches = [];
-                this.batchesLoadFailed = true;
-            }
-            // A different branch means a different set of batches — the
-            // previous selection (or lack of one) no longer means anything,
-            // so this asks again rather than silently picking one.
+        this.onDispose(on(this.container, 'click', '[data-action="month"]', () => this.monthView()));
+        this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
+            this.openBatchRegister(target.dataset.openBatch)));
+        this.onDispose(on(this.container, 'click', '[data-action="back"]', () => {
             this.batchId = null;
-            this.batchExplicit = false;
-            this.dirty.clear();
-            // Re-renders the header (so the Batch selector reflects the new
-            // branch's list) without re-binding — bind()'s listeners are
-            // delegated to this.container, which this render() call doesn't
-            // replace, only its children, so they remain valid as-is.
-            render(this.container, this.shell());
-            this.load();
-        });
+            this.loadBoard();
+        }));
+
+        this.events.on(EVENTS.BRANCH_CHANGED, () => { this.batchId = null; this.loadBoard(); });
     }
 
-    async load() {
-        this.container.querySelectorAll('[data-tab]').forEach((btn) => {
-            const active = btn.dataset.tab === this.tab;
-            btn.classList.toggle('is-active', active);
-            btn.setAttribute('aria-selected', String(active));
-        });
+    /* ------------------------------------------------------------- DAY BOARD */
 
-        const panel = this.container.querySelector('[data-role="panel"]');
+    async loadBoard() {
+        const body = this.container.querySelector('[data-role="body"]');
+        render(body, html`<div class="skeleton skeleton-row"></div>`);
 
-        if (!this.batches.length) {
-            render(panel, this.batchesLoadFailed ? html`
+        try {
+            const [board, missing, holiday] = await Promise.all([
+                dayBoard(this.date, session.branch()),
+                missingRegisters({ days: 7, branchId: session.branch() }),
+                holidays$.on(this.date, session.branch())
+            ]);
+
+            render(this.container.querySelector('[data-role="title"]'), 'Attendance');
+            render(this.container.querySelector('[data-role="subtitle"]'),
+                `${formatDateLong(this.date)} · ${board.batches.filter((b) => b.done).length} of ${board.batches.length} registers marked`);
+
+            render(body, this.boardView(board, missing, holiday));
+        } catch (err) {
+            console.error(err);
+            toast.error(err.message);
+        }
+    }
+
+    boardView(board, missing, holiday) {
+        if (holiday) {
+            return html`
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${raw(icon('alert-triangle'))}</div>
-                        <h2 class="empty-title">Could not load batches</h2>
-                        <p class="empty-text">Something went wrong fetching your batches. Reload the page to try again.</p>
+                        <div class="empty-glyph">${raw(icon('sun'))}</div>
+                        <h2 class="empty-title">${holiday.name}</h2>
+                        <p class="empty-text">No classes run on ${formatDateLong(this.date)}.</p>
                     </div>
                 </div></div>
+            `;
+        }
+
+        return html`
+            ${missing.length ? html`
+                <div class="alert alert-warning">
+                    <div class="alert-title">${missing.length} register${missing.length === 1 ? '' : 's'} unmarked this week</div>
+                    <ul class="stack stack-xs mt-2">
+                        ${missing.slice(0, 5).map((entry) => html`
+                            <li class="spread">
+                                <span>${entry.batch.name} · ${formatDate(entry.date)}</span>
+                                <button class="btn btn-sm btn-secondary"
+                                        data-open-batch="${entry.batch.id}">Mark</button>
+                            </li>
+                        `)}
+                    </ul>
+                </div>
+            ` : ''}
+
+            ${board.batches.length ? html`
+                <div class="grid grid-3">
+                    ${board.batches.map((batch) => html`
+                        <button class="card card-interactive" data-open-batch="${batch.id}">
+                            <div class="card-body">
+                                <div class="spread">
+                                    <h3 class="card-title">${batch.name}</h3>
+                                    <span class="badge ${batch.done ? 'badge-success' : 'badge-warning'}">
+                                        ${batch.done ? 'Marked' : 'Pending'}
+                                    </span>
+                                </div>
+                                <p class="card-subtitle">
+                                    ${batch.startTime}–${batch.endTime} · ${batch.teacherName}
+                                    ${batch.room ? `· ${batch.room}` : ''}
+                                </p>
+                                <div class="divider"></div>
+                                <div class="spread">
+                                    <span class="type-caption type-muted">
+                                        ${formatNumber(batch.expected)} on the roll
+                                    </span>
+                                    <span class="type-strong">
+                                        ${batch.done ? `${batch.rate}% present` : 'Not marked'}
+                                    </span>
+                                </div>
+                            </div>
+                        </button>
+                    `)}
+                </div>
             ` : html`
                 <div class="card"><div class="card-body">
                     <div class="empty">
-                        <div class="empty-glyph">${raw(icon('grid'))}</div>
-                        <h2 class="empty-title">No batches to show</h2>
-                        <p class="empty-text">Create a batch before attendance can be recorded.</p>
+                        <div class="empty-glyph">${raw(icon('calendar'))}</div>
+                        <h2 class="empty-title">No batches meet on ${formatDate(this.date)}</h2>
+                        <p class="empty-text">Pick another date, or check the timetable.</p>
+                        <div class="empty-actions">
+                            <a class="btn btn-secondary" href="#/timetable">Open timetable</a>
+                        </div>
                     </div>
                 </div></div>
-            `);
-            return;
-        }
-
-        if (!this.batchId) {
-            render(panel, html`
-                <div class="card"><div class="card-body">
-                    <div class="empty">
-                        <div class="empty-glyph">${raw(icon('check-square'))}</div>
-                        <h2 class="empty-title">Choose a batch</h2>
-                        <p class="empty-text">Pick a batch above to view and mark its attendance.</p>
-                    </div>
-                </div></div>
-            `);
-            return;
-        }
-
-        render(panel, html`<div class="skeleton skeleton-row"></div>`);
-
-        try {
-            if (this.tab === 'week') await this.loadWeek(panel);
-            else if (this.tab === 'range') await this.loadRange(panel);
-            else await this.loadMonth(panel);
-        } catch (err) {
-            render(panel, html`<div class="alert alert-danger"><p class="alert-body">${err.message}</p></div>`);
-        }
-    }
-
-    /* ---------------------------------------------------------------- WEEK */
-
-    async loadWeek(panel) {
-        this.grid = await weeklyGrid({ batchId: this.batchId, weekStart: this.weekAnchor });
-        render(panel, this.weekShell());
-        this.paintGrid();
-    }
-
-    weekShell() {
-        return html`
-            <div class="row row-wrap mb-3">
-                <button class="btn btn-secondary btn-icon btn-sm" data-week-shift="-7" aria-label="Previous week">
-                    ${raw(icon('chevron-left', { size: 15 }))}
-                </button>
-                <span class="type-strong">${formatDate(this.grid.weekStart)} – ${formatDate(this.grid.weekEnd)}</span>
-                <button class="btn btn-secondary btn-icon btn-sm" data-week-shift="7" aria-label="Next week">
-                    ${raw(icon('chevron-right', { size: 15 }))}
-                </button>
-            </div>
-            <div data-role="grid"></div>
+            `}
         `;
     }
 
-    /* --------------------------------------------------------------- RANGE */
+    /* -------------------------------------------------------------- REGISTER */
 
-    async loadRange(panel) {
-        render(panel, html`
-            <div class="filter-bar mb-3">
-                <div class="row row-wrap">
-                    <label class="filter-control">
-                        <span class="sr-only">From</span>
-                        <input class="input input-sm" type="date" value="${this.rangeFrom}" data-role="from">
-                    </label>
-                    <label class="filter-control">
-                        <span class="sr-only">To</span>
-                        <input class="input input-sm" type="date" value="${this.rangeTo}" data-role="to">
-                    </label>
-                    <button class="btn btn-secondary btn-sm" data-action="show-range">Show</button>
-                </div>
-            </div>
-            <div data-role="grid"><p class="type-muted">Choose a range and select Show.</p></div>
-        `);
-
-        // Re-entered every time this tab loads (switching away and back
-        // re-runs loadRange against the same, persistent panel node) — the
-        // previous round's delegated listeners must be disposed first, or
-        // each visit binds another copy on top of the last.
-        this.rangeDisposers?.forEach((fn) => fn());
-        this.rangeDisposers = [
-            on(panel, 'change', '[data-role="from"]', (_e, target) => { this.rangeFrom = target.value; }),
-            on(panel, 'change', '[data-role="to"]', (_e, target) => { this.rangeTo = target.value; }),
-            on(panel, 'click', '[data-action="show-range"]', async () => {
-                try {
-                    this.grid = await customRangeGrid({ batchId: this.batchId, from: this.rangeFrom, to: this.rangeTo });
-                    this.dirty.clear();
-                    this.paintGrid();
-                } catch (err) {
-                    toast.error(err.message);
-                }
-            })
-        ];
-        this.onDispose(() => this.rangeDisposers.forEach((fn) => fn()));
-
-        this.grid = await customRangeGrid({ batchId: this.batchId, from: this.rangeFrom, to: this.rangeTo });
-        this.paintGrid();
-    }
-
-    /* --------------------------------------------------------- MARKABLE GRID */
-
-    paintGrid() {
-        const panel = this.container.querySelector('[data-role="panel"]');
-        const slot = panel.querySelector('[data-role="grid"]') || panel;
-        const grid = this.grid;
-        const canEdit = session.can('attendance.mark');
-
-        if (!grid.days.length) {
-            render(slot, html`<div class="empty empty-compact">
-                <p class="empty-text">${grid.batch.name} has no scheduled classes in this period.</p>
-            </div>`);
-            return;
-        }
-
-        render(slot, html`
-            <div class="table-wrap">
-                <table class="table table-pin-first table-compact">
-                    <caption class="sr-only">Attendance for ${grid.batch.name}</caption>
-                    <thead>
-                        <tr>
-                            <th scope="col">Student</th>
-                            ${grid.days.map((d) => html`<th scope="col" class="text-center" title="${formatDate(d.date)}">${d.label}</th>`)}
-                            <th scope="col" class="text-right">Total</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${grid.rows.map((row) => html`
-                            <tr data-student="${row.student.id}">
-                                <th scope="row">${row.student.name}</th>
-                                ${grid.days.map((d, i) => {
-                                    const staged = this.dirty.get(d.date)?.get(row.student.id);
-                                    const status = staged || row.cells[i];
-                                    const mark = MARKS.find((m) => m.value === status);
-                                    return html`<td class="text-center">
-                                        ${canEdit ? html`
-                                            <button type="button" class="mark-btn ${mark ? 'is-active' : ''}"
-                                                    data-tone="${mark?.tone || 'neutral'}"
-                                                    data-cell-date="${d.date}" data-cell-student="${row.student.id}"
-                                                    data-cell-status="${status || ''}"
-                                                    aria-label="${row.student.name}, ${d.label}, ${mark?.label || 'not marked'}">
-                                                ${mark ? mark.short : '·'}
-                                            </button>
-                                        ` : html`
-                                            <span class="type-muted">${mark ? mark.short : '·'}</span>
-                                        `}
-                                    </td>`;
-                                })}
-                                <td class="text-right">
-                                    ${row.total === 0 ? html`<span class="type-muted">—</span>` : html`
-                                        <span class="badge ${row.rate >= 80 ? 'badge-success' : row.rate >= 65 ? 'badge-warning' : 'badge-danger'}">
-                                            ${row.present}/${row.total}
-                                        </span>
-                                    `}
-                                </td>
-                            </tr>
-                        `)}
-                    </tbody>
-                </table>
-            </div>
-            ${canEdit ? html`
-                <div class="row spread mt-3">
-                    <span class="type-caption type-muted">Only the days this batch actually meets are shown.</span>
-                    <button class="btn btn-primary" data-action="save-grid" ${this.dirty.size ? '' : 'disabled'}>
-                        Save changes
-                    </button>
-                </div>
-            ` : ''}
-        `);
-
-        this.bindGrid(slot);
-    }
-
-    bindGrid(slot) {
-        this.gridDisposers?.forEach((fn) => fn());
-        this.gridDisposers = [
-            on(slot, 'click', '[data-cell-date]', (_e, target) => {
-                const { cellDate: date, cellStudent: studentId, cellStatus: current } = target.dataset;
-                const next = current === ATTENDANCE_STATUS.PRESENT ? ATTENDANCE_STATUS.ABSENT : ATTENDANCE_STATUS.PRESENT;
-
-                if (!this.dirty.has(date)) this.dirty.set(date, new Map());
-                this.dirty.get(date).set(studentId, next);
-                this.paintGrid();
-            }),
-            on(this.container, 'click', '[data-action="save-grid"]', () => this.saveGrid())
-        ];
-        this.onDispose(() => this.gridDisposers.forEach((fn) => fn()));
-    }
-
-    /** Posts one postRegister() call per dirty date — each call carries that date's complete roster, matching the one-atomic-write-per-day contract. */
-    async saveGrid() {
-        const grid = this.grid;
-        let saved = 0;
+    async openBatchRegister(batchId) {
+        this.batchId = batchId;
+        const body = this.container.querySelector('[data-role="body"]');
+        render(body, html`<div class="skeleton skeleton-row"></div>`);
 
         try {
-            for (const [date, changes] of this.dirty) {
-                const entries = grid.rows.map((row) => {
-                    const dayIndex = grid.days.findIndex((d) => d.date === date);
-                    const loaded = dayIndex >= 0 ? row.cells[dayIndex] : null;
-                    const status = changes.get(row.student.id) || loaded || ATTENDANCE_STATUS.PRESENT;
-                    return { studentId: row.student.id, status };
-                });
-                await postRegister({ batchId: this.batchId, date, entries });
-                saved += 1;
-            }
+            [this.register, this.holiday] = await Promise.all([
+                openRegister(batchId, this.date),
+                holidays$.on(this.date, session.branch())
+            ]);
+        } catch (err) {
+            toast.error(err.message);
+            this.batchId = null;
+            return this.loadBoard();
+        }
 
-            toast.success(`Saved attendance for ${saved} day${saved === 1 ? '' : 's'}.`);
-            this.dirty.clear();
-            await this.load();
+        render(this.container.querySelector('[data-role="title"]'), this.register.batch.name);
+        render(this.container.querySelector('[data-role="subtitle"]'),
+            `${this.register.dayName}, ${formatDateLong(this.date)} · ${this.register.entries.length} students`);
+
+        this.paintRegister();
+        return undefined;
+    }
+
+    paintRegister() {
+        const body = this.container.querySelector('[data-role="body"]');
+        const reg = this.register;
+        const canEdit = session.can('attendance.mark');
+
+        render(body, html`
+            <div class="row row-wrap">
+                <button class="btn btn-sm btn-ghost" data-action="back">
+                    ${raw(icon('arrow-left', { size: 15 }))} All registers
+                </button>
+            </div>
+
+            ${this.holiday ? html`
+                <div class="alert alert-info">
+                    <p class="alert-body">${formatDate(this.date)} is a holiday — ${this.holiday.name}.
+                    Marking is still possible if the class went ahead.</p>
+                </div>
+            ` : ''}
+
+            ${!reg.scheduled ? html`
+                <div class="alert alert-warning">
+                    <p class="alert-body">${reg.batch.name} does not normally meet on a ${reg.dayName}.
+                    You can still mark a make-up class.</p>
+                </div>
+            ` : ''}
+
+            ${reg.alreadyMarked ? html`
+                <div class="alert alert-info">
+                    <p class="alert-body">This register was already marked. Saving again records a correction.</p>
+                </div>
+            ` : ''}
+
+            ${reg.empty ? html`
+                <div class="card"><div class="card-body">
+                    <div class="empty">
+                        <div class="empty-glyph">${raw(icon('users'))}</div>
+                        <h2 class="empty-title">Nobody is in this batch</h2>
+                        <p class="empty-text">Students must be placed in the batch before a register exists.</p>
+                        <div class="empty-actions">
+                            <a class="btn btn-primary" href="#/students?filter=unplaced">Place students</a>
+                        </div>
+                    </div>
+                </div></div>
+            ` : html`
+                <section class="card">
+                    <div class="card-header">
+                        <div>
+                            <h2 class="card-title">Roll call</h2>
+                            <p class="card-subtitle" data-role="tally"></p>
+                        </div>
+                        ${canEdit ? html`
+                            <div class="card-actions">
+                                <button class="btn btn-sm btn-secondary" data-all="present">All present</button>
+                                <button class="btn btn-sm btn-secondary" data-all="absent">All absent</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="card-body card-body-flush">
+                        <ul class="register">
+                            ${reg.entries.map((entry, index) => html`
+                                <li class="register-row" data-student="${entry.studentId}">
+                                    <div class="register-who">
+                                        <span class="type-caption type-muted">${index + 1}</span>
+                                        <div>
+                                            <span class="type-strong">${entry.name}</span>
+                                            <div class="type-caption type-muted">
+                                                ${entry.admissionNo || ''}
+                                                ${entry.medicalNotes ? '· medical note' : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="register-marks" role="group" aria-label="Mark ${entry.name}">
+                                        ${MARKS.map((mark) => html`
+                                            <button type="button"
+                                                    class="mark-btn ${entry.status === mark.value ? 'is-active' : ''}"
+                                                    data-tone="${mark.tone}"
+                                                    data-mark="${mark.value}"
+                                                    ${canEdit ? '' : 'disabled'}
+                                                    aria-pressed="${entry.status === mark.value}"
+                                                    title="${mark.label}">
+                                                <span aria-hidden="true">${mark.short}</span>
+                                                <span class="sr-only">${mark.label}</span>
+                                            </button>
+                                        `)}
+                                    </div>
+                                </li>
+                            `)}
+                        </ul>
+                    </div>
+                    ${canEdit ? html`
+                        <div class="card-footer spread">
+                            <span class="type-caption type-muted">
+                                Saved in one go — a half-written register is never left behind.
+                            </span>
+                            <button class="btn btn-primary" data-action="save">
+                                ${reg.alreadyMarked ? 'Save correction' : 'Save register'}
+                            </button>
+                        </div>
+                    ` : ''}
+                </section>
+            `}
+        `);
+
+        this.updateTally();
+        this.bindRegister();
+    }
+
+    bindRegister() {
+        const body = this.container.querySelector('[data-role="body"]');
+
+        this.registerDisposers?.forEach((fn) => fn());
+        this.registerDisposers = [
+            on(body, 'click', '[data-mark]', (_e, target) => {
+                const row = target.closest('[data-student]');
+                const entry = this.register.entries.find((e) => e.studentId === row.dataset.student);
+                entry.status = target.dataset.mark;
+
+                row.querySelectorAll('[data-mark]').forEach((button) => {
+                    const active = button.dataset.mark === entry.status;
+                    button.classList.toggle('is-active', active);
+                    button.setAttribute('aria-pressed', String(active));
+                });
+                this.updateTally();
+            }),
+            on(body, 'click', '[data-all]', (_e, target) => {
+                const status = target.dataset.all === 'present'
+                    ? ATTENDANCE_STATUS.PRESENT : ATTENDANCE_STATUS.ABSENT;
+                this.register.entries.forEach((entry) => { entry.status = status; });
+                this.paintRegister();
+            }),
+            on(body, 'click', '[data-action="save"]', () => this.save())
+        ];
+
+        this.onDispose(() => this.registerDisposers.forEach((fn) => fn()));
+    }
+
+    updateTally() {
+        const slot = this.container.querySelector('[data-role="tally"]');
+        if (!slot || !this.register) return;
+
+        const counts = MARKS.map((mark) => ({
+            ...mark,
+            count: this.register.entries.filter((entry) => entry.status === mark.value).length
+        }));
+
+        render(slot, html`${counts.filter((c) => c.count).map((c) => `${c.count} ${c.label.toLowerCase()}`).join(' · ')}`);
+    }
+
+    async save() {
+        try {
+            const result = await postRegister({
+                batchId: this.register.batch.id,
+                date: this.date,
+                entries: this.register.entries.map((entry) => ({
+                    studentId: entry.studentId,
+                    status: entry.status
+                }))
+            });
+
+            toast.success(result?.corrections
+                ? `Register corrected — ${result.corrections} mark${result.corrections === 1 ? '' : 's'} changed.`
+                : 'Register saved.');
+
+            await this.openBatchRegister(this.register.batch.id);
         } catch (err) {
             toast.error(err.message);
         }
     }
 
-    /* --------------------------------------------------------------- MONTH */
+    /* ------------------------------------------------------------- MONTH VIEW */
 
-    async loadMonth(panel) {
-        const month = monthKey(this.weekAnchor);
-        render(panel, html`
-            <div class="filter-bar mb-3">
-                <label class="filter-control">
-                    <span class="sr-only">Month</span>
-                    <input class="input input-sm" type="month" value="${month}" data-role="month">
-                </label>
-            </div>
-            <div data-role="grid"></div>
-        `);
+    async monthView() {
+        const batches = await listBatches(session.branch());
+        if (!batches.length) {
+            toast.info('There are no batches to show.');
+            return;
+        }
 
-        let current = month;
-        const paint = async () => {
-            const grid = await monthlyGrid({ batchId: this.batchId, month: current });
-            render(panel.querySelector('[data-role="grid"]'), this.monthGridView(grid));
-        };
+        let batchId = this.batchId || batches[0].id;
+        let month = monthKey(this.date);
 
-        // Same re-entrant panel as loadRange() — dispose the previous
-        // round's listener before adding another.
-        this.monthDisposer?.();
-        this.monthDisposer = on(panel, 'change', '[data-role="month"]', (_e, target) => { current = target.value; paint(); });
-        this.onDispose(() => this.monthDisposer?.());
-        await paint();
+        await drawer({
+            title: 'Month view',
+            description: 'Every meeting day in the month, per student.',
+            size: 'wide',
+            content: html`
+                <div class="filter-bar">
+                    <div class="row row-wrap">
+                        <label class="filter-control">
+                            <span class="sr-only">Batch</span>
+                            <select class="select select-sm" data-role="batch">
+                                ${batches.map((batch) => html`
+                                    <option value="${batch.id}" ${batch.id === batchId ? 'selected' : ''}>
+                                        ${batch.name}
+                                    </option>
+                                `)}
+                            </select>
+                        </label>
+                        <label class="filter-control">
+                            <span class="sr-only">Month</span>
+                            <input class="input input-sm" type="month" value="${month}" data-role="month">
+                        </label>
+                    </div>
+                </div>
+                <div data-role="grid"><p class="type-muted">Loading…</p></div>
+            `,
+            actions: [{ label: 'Close', variant: 'secondary', value: null }],
+            onMount: (body) => {
+                const paint = async () => {
+                    const slot = body.querySelector('[data-role="grid"]');
+                    render(slot, html`<div class="skeleton skeleton-row"></div>`);
+                    try {
+                        const grid = await monthlyGrid({ batchId, month });
+                        render(slot, this.gridView(grid));
+                    } catch (err) {
+                        render(slot, html`<div class="alert alert-danger"><p class="alert-body">${err.message}</p></div>`);
+                    }
+                };
+
+                on(body, 'change', '[data-role="batch"]', (_e, target) => { batchId = target.value; paint(); });
+                on(body, 'change', '[data-role="month"]', (_e, target) => { month = target.value; paint(); });
+                paint();
+            }
+        });
     }
 
-    monthGridView(grid) {
+    gridView(grid) {
         if (!grid.days.length) {
             return html`<div class="empty empty-compact">
                 <p class="empty-text">${grid.batch.name} has no meeting days yet in ${formatMonth(grid.month)}.</p>
@@ -441,7 +475,9 @@ export default class AttendancePage extends Page {
         return html`
             <div class="table-wrap">
                 <table class="table table-pin-first table-compact">
-                    <caption class="sr-only">Attendance for ${grid.batch.name}, ${formatMonth(grid.month)}</caption>
+                    <caption class="sr-only">
+                        Attendance for ${grid.batch.name}, ${formatMonth(grid.month)}
+                    </caption>
                     <thead>
                         <tr>
                             <th scope="col">Student</th>
@@ -459,21 +495,25 @@ export default class AttendancePage extends Page {
                                     const meta = MARKS.find((m) => m.value === cell);
                                     return html`<td class="text-center">
                                         ${meta
-                                            ? html`<span class="mark-dot" data-tone="${meta.tone}" title="${meta.label}">${meta.short}</span>`
+                                            ? html`<span class="mark-dot" data-tone="${meta.tone}"
+                                                         title="${meta.label}">${meta.short}</span>`
                                             : html`<span class="type-muted" aria-label="not marked">·</span>`}
                                     </td>`;
                                 })}
                                 <td class="text-right">
                                     ${row.rate === null
                                         ? html`<span class="type-muted">—</span>`
-                                        : html`<span class="badge ${row.rate >= 80 ? 'badge-success' : row.rate >= 65 ? 'badge-warning' : 'badge-danger'}">${row.rate}%</span>`}
+                                        : html`<span class="badge ${row.rate >= 80 ? 'badge-success'
+                                            : row.rate >= 65 ? 'badge-warning' : 'badge-danger'}">${row.rate}%</span>`}
                                 </td>
                             </tr>
                         `)}
                     </tbody>
                 </table>
             </div>
-            <p class="type-caption type-muted mt-2">Only days this batch meets appear as columns.</p>
+            <p class="type-caption type-muted mt-2">
+                Only days this batch meets appear as columns.
+            </p>
         `;
     }
 }

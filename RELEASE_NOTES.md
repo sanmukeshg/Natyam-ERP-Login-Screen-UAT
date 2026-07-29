@@ -1,3 +1,26 @@
+# Release Notes — NATYAM ERP v2.20.0
+
+**Release:** Milestone B2 — Restore the Old Attendance Screen
+**Date:** 28 July 2026
+**Baseline:** v2.19.0
+**Type:** UI change, at direct request. Attendance is out of the sidebar again; the register screen is back to its simpler, one-day-at-a-time design.
+
+## What changed for the academy
+
+- **Attendance no longer has its own item in the side menu.** It's still exactly where it's always been from Timetable — click "Take register" on any class and it opens straight to that day's roll call.
+- **The register itself is back to the simple design**: a day board of batch cards (Marked/Pending), and for one batch on one day, a plain list of students with a Present/Absent button each, an "All present"/"All absent" shortcut, and one "Save register" button. Month view is still there for a full month's grid, per batch.
+
+## For administrators / IT
+
+- No manual step needed — no `firestore.rules` change, no migration.
+- "Declare holiday" and any Leave-request actions are not part of this restored screen — neither has had a live path anywhere in the app for some time (holidays are read-only; NATYAM has no Leave concept). A holiday is still shown as an informational banner when one falls on the day being viewed.
+
+## Quality
+
+- Static analysis clean: no import cycles, all imports resolve, no undefined identifiers. The rebuilt page was loaded directly in a real browser (dynamic import) to confirm it parses and every import resolves at runtime, not just statically.
+
+---
+
 # Release Notes — NATYAM ERP v2.19.0
 
 **Release:** Milestone B1 — Multi-Level Batches
