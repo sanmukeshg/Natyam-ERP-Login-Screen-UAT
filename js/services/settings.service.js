@@ -19,7 +19,7 @@ import { session } from '../core/session.js';
 import { db } from '../core/db.js';
 import { localDate } from '../utils/date.js';
 import { toAmount } from '../utils/money.js';
-import { CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
+import { CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, levelsOf, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
 import {
     settings$, branches$, academicYears$, feePlans$, users$, students$, staff$, batches$, invoices$,
     programs$, expenses$, branchIdsOf
@@ -227,7 +227,7 @@ export async function masterEntryUsage(setName, value) {
     if (setName === 'levels') {
         const [studentRows, batchRows] = await Promise.all([students$.all(), batches$.all()]);
         return studentRows.filter((r) => r.level === value).length
-            + batchRows.filter((r) => r.level === value).length;
+            + batchRows.filter((r) => levelsOf(r).includes(value)).length;
     }
     if (setName === 'programTypes') {
         return (await programs$.all()).filter((p) => p.type === value).length;

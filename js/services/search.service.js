@@ -14,7 +14,7 @@
  */
 
 import { session } from '../core/session.js';
-import { NAVIGATION } from '../config/app.config.js';
+import { NAVIGATION, levelsLabel, levelsOf } from '../config/app.config.js';
 import { formatMoney } from '../utils/money.js';
 import { formatDate } from '../utils/date.js';
 import {
@@ -60,7 +60,7 @@ const SOURCES = [
         map: (b) => ({
             id: b.id,
             title: b.name,
-            subtitle: [b.code, b.level].filter(Boolean).join(' · '),
+            subtitle: [b.code, levelsLabel(levelsOf(b))].filter(Boolean).join(' · '),
             meta: b.status === 'active' ? null : 'Closed',
             route: `#/batches/${b.id}`
         })

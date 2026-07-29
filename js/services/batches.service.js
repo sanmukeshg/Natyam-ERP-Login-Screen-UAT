@@ -15,7 +15,7 @@
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
 import { localDate, dayName, addDays, startOfWeek } from '../utils/date.js';
-import { LEVELS, levelLabel } from '../config/app.config.js';
+import { LEVELS, levelLabel, levelsLabel, levelsOf } from '../config/app.config.js';
 import { batches$, students$, staff$, attendance$, branches$, AttendanceMath } from '../data/repositories.js';
 import { markedSessions } from './attendance.service.js';
 import { sessionMap } from './session.service.js';
@@ -106,14 +106,18 @@ export async function updateBatch(id, changes, { allowConflicts = false } = {}) 
     const candidate = normalise({ ...existing, ...changes, id });
     assertShape(candidate);
 
-    /* Changing the level of a batch that has students in it would silently
-       leave them at the wrong level for promotion and certification. */
-    if (candidate.level !== existing.level) {
+    /* Removing a level a batch used to teach would silently leave anyone
+       still enrolled at exactly that level with the wrong level for
+       promotion and certification. Adding a level is always safe — nobody
+       already enrolled could conflict with a level newly added to the set. */
+    const removedLevels = levelsOf(existing).filter((l) => !levelsOf(candidate).includes(l));
+    if (removedLevels.length) {
         const roster = await students$.byBatch(id);
-        if (roster.length) {
+        const affected = roster.filter((s) => removedLevels.includes(s.level));
+        if (affected.length) {
             throw new Error(
-                `${roster.length} student${roster.length === 1 ? ' is' : 's are'} enrolled at ${levelLabel(existing.level)} in this batch. ` +
-                'Move them out before changing the level.'
+                `${affected.length} student${affected.length === 1 ? ' is' : 's are'} enrolled at ${levelsLabel(removedLevels)} in this batch. ` +
+                'Move them out before removing that level.'
             );
         }
     }
@@ -137,7 +141,7 @@ export async function updateBatch(id, changes, { allowConflicts = false } = {}) 
     // matching app.js's maintenance() pattern for non-fatal housekeeping.
     try {
         const roster = await students$.byBatch(id);
-        await Promise.all(roster.map((s) => students$.update(s.id, { batchSchedule: batchScheduleOf(batch) })));
+        await Promise.all(roster.map((s) => students$.update(s.id, { batchSchedule: batchScheduleOf(batch, s.level) })));
     } catch (err) {
         console.error('Failed to refresh batchSchedule on enrolled students after a batch update', err);
     }
@@ -165,7 +169,17 @@ export async function closeBatch(id, { reason = null, moveTo = null } = {}) {
     if (roster.length && moveTo) {
         const target = await batches$.findOrFail(moveTo);
         if (target.status !== 'active') throw new Error(`${target.name} is not active.`);
-        if (target.level !== batch.level) throw new Error(`${target.name} teaches ${levelLabel(target.level)}, not ${levelLabel(batch.level)}.`);
+
+        // A per-student check, not a batch-to-batch one: a multi-level
+        // source batch's actual roster may only occupy a subset of its
+        // configured levels, so the target only needs to cover whichever
+        // levels those specific students are at.
+        const targetLevels = levelsOf(target);
+        const uncovered = roster.filter((s) => !targetLevels.includes(s.level));
+        if (uncovered.length) {
+            const missingLevels = [...new Set(uncovered.map((s) => s.level))];
+            throw new Error(`${target.name} does not teach ${levelsLabel(missingLevels)}, needed for ${uncovered.length} of these students.`);
+        }
 
         const existing = await students$.byBatch(moveTo);
         if (target.capacity && existing.length + roster.length > target.capacity) {
@@ -223,7 +237,7 @@ export async function listBatches(branchId = null, { includeClosed = false } = {
         .map((batch) => ({
             ...batch,
             teacherName: teacherName.get(batch.teacherId) || 'Unassigned',
-            levelLabel: levelLabel(batch.level),
+            levelLabel: levelsLabel(levelsOf(batch)),
             schedule: describeSchedule(batch),
             attendanceRate: AttendanceMath.rateOf(byBatch.get(batch.id) || [])
         }))
@@ -250,7 +264,7 @@ export async function batchDetail(id) {
     return {
         batch: {
             ...batch,
-            levelLabel: levelLabel(batch.level),
+            levelLabel: levelsLabel(levelsOf(batch)),
             schedule: describeSchedule(batch),
             enrolled: roster.length,
             seatsLeft: batch.capacity ? Math.max(0, batch.capacity - roster.length) : null,
@@ -330,7 +344,7 @@ export async function timetable(branchId = null) {
                 endTime,
                 teacherId,
                 teacherName: teacherName.get(teacherId) || 'Unassigned',
-                levelLabel: levelLabel(b.level),
+                levelLabel: levelsLabel(levelsOf(b)),
                 registerMarked: markedSet.has(`${b.id}|${date}`),
                 sessionId: classSession?.id || null,
                 sessionStatus: classSession?.status || 'scheduled',
@@ -354,7 +368,7 @@ export async function teacherSchedule(teacherId) {
     return WEEK.map((day) => ({
         day,
         sessions: batches
-            .map((b, i) => ({ ...b, enrolled: rosters[i].length, levelLabel: levelLabel(b.level) }))
+            .map((b, i) => ({ ...b, enrolled: rosters[i].length, levelLabel: levelsLabel(levelsOf(b)) }))
             .filter((b) => (b.days || []).includes(day))
             .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
     })).filter((d) => d.sessions.length);
@@ -363,7 +377,15 @@ export async function teacherSchedule(teacherId) {
 /* ------------------------------------------------------------------ HELPERS */
 
 function normalise(data) {
-    const level = LEVELS.find((l) => l.value === data.level);
+    // Milestone B1: `levels` (array) is the source of truth; `data.level`
+    // (a lone value from a not-yet-edited pre-B1 document, or a caller that
+    // hasn't been updated) is accepted as a one-element fallback so nothing
+    // upstream has to change shape before this function does.
+    const levels = Array.isArray(data.levels)
+        ? LEVELS.filter((l) => data.levels.includes(l.value)).map((l) => l.value)
+        : (data.level ? [data.level] : []);
+    const levelOrder = Math.min(...levels.map((v) => LEVELS.find((l) => l.value === v)?.order ?? 99), 99);
+
     return {
         ...data,
         name: String(data.name || '').trim(),
@@ -371,7 +393,8 @@ function normalise(data) {
         room: data.room?.trim() || null,
         days: Array.isArray(data.days) ? WEEK.filter((d) => data.days.includes(d)) : [],
         capacity: Number(data.capacity) || 0,
-        levelOrder: level?.order || 99,
+        levels,
+        levelOrder,
         status: data.status || 'active'
     };
 }
@@ -380,7 +403,7 @@ function assertShape(batch) {
     if (!batch.name) throw new Error('A batch needs a name.');
     if (!batch.code) throw new Error('A batch needs a short code, e.g. HYD-PRA-A.');
     if (!batch.branchId) throw new Error('Choose which branch this batch runs at.');
-    if (!batch.level) throw new Error('Choose the level this batch teaches.');
+    if (!batch.levels?.length) throw new Error('Choose at least one level this batch teaches.');
     if (!batch.days.length) throw new Error('Choose at least one day the batch meets.');
     if (!batch.startTime || !batch.endTime) throw new Error('Give the start and end time.');
     if (batch.endTime <= batch.startTime) throw new Error('The batch cannot end before it starts.');

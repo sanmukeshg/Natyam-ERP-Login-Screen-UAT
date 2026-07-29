@@ -17,7 +17,7 @@ import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
 import { sequenceNumber } from '../utils/id.js';
 import { localDate, academicYearOf, ageFrom } from '../utils/date.js';
-import { ADMISSION_STATUS, STUDENT_STATUS, LEVELS, levelLabel } from '../config/app.config.js';
+import { ADMISSION_STATUS, STUDENT_STATUS, LEVELS, levelLabel, levelsLabel, levelsOf } from '../config/app.config.js';
 import {
     admissions$, drafts$, students$, batches$, feePlans$, branches$, settings$
 } from '../data/repositories.js';
@@ -432,7 +432,10 @@ export async function eligibleBatches(admissionOrLevel, branchId = null) {
         .map((b) => {
             const full = Boolean(b.capacity) && b.enrolled >= b.capacity;
             const closed = b.status !== 'active';
-            const sameLevel = b.level === level;
+            // Milestone B1: a batch teaches a *set* of levels now — this was
+            // already just a sort/label hint (every active batch with room
+            // was already offered regardless), so it only gets more accurate.
+            const sameLevel = levelsOf(b).includes(level);
             return {
                 ...b,
                 sameLevel,
@@ -440,7 +443,7 @@ export async function eligibleBatches(admissionOrLevel, branchId = null) {
                 reason: closed ? 'Closed'
                     : full ? `Full (${b.enrolled}/${b.capacity})`
                     : sameLevel ? `${b.seatsLeft} seat${b.seatsLeft === 1 ? '' : 's'} left`
-                    : `${levelLabel(b.level)} · ${b.seatsLeft} seat${b.seatsLeft === 1 ? '' : 's'} left`
+                    : `${levelsLabel(levelsOf(b))} · ${b.seatsLeft} seat${b.seatsLeft === 1 ? '' : 's'} left`
             };
         })
         .sort((a, b) => Number(b.selectable) - Number(a.selectable)

@@ -356,7 +356,7 @@ async function seedBatches(branches, staff) {
         id: uid('BCH'),
         code: definition.code,
         name: definition.name,
-        level: definition.level,
+        levels: [definition.level],
         branchId: branches[definition.branch].id,
         teacherId: teachers[index % teachers.length].id,
         days: definition.days,
@@ -386,7 +386,7 @@ async function seedStudents(branches, batches, plans) {
             : roll < 0.86 ? 'intermediate-certificate'
             : roll < 0.96 ? 'intermediate-diploma' : 'advanced-masters';
 
-        const candidates = batches.filter((b) => b.level === level);
+        const candidates = batches.filter((b) => (b.levels || []).includes(level));
         const batch = candidates.length ? pick(candidates) : null;
         const branchId = batch ? batch.branchId : branches[0].id;
         const guardian = `${pick(GIVEN_NAMES)} ${name.split(' ')[1]}`;

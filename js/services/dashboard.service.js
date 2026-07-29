@@ -16,7 +16,7 @@
  */
 
 import { localDate, addDays, monthKey, startOfMonth, lastMonths, formatMonth, daysBetween } from '../utils/date.js';
-import { STUDENT_STATUS } from '../config/app.config.js';
+import { STUDENT_STATUS, levelsOf } from '../config/app.config.js';
 import {
     students$, batches$, admissions$, invoices$, payments$, programs$,
     attendance$, staff$, branches$, holidays$, branchIdsOf, AttendanceMath, PaymentMath, InvoiceMath
@@ -169,7 +169,7 @@ export async function today(branchId = null) {
         classes: board.batches.map((b) => ({
             id: b.id,
             name: b.name,
-            level: b.level,
+            levels: levelsOf(b),
             room: b.room,
             teacher: b.teacherName,
             startTime: b.startTime,
@@ -254,7 +254,7 @@ export async function attendancePanel(branchId = null) {
         .map((batch) => ({
             id: batch.id,
             name: batch.name,
-            level: batch.level,
+            levels: levelsOf(batch),
             rate: AttendanceMath.rateOf(byBatch.get(batch.id) || []),
             marks: (byBatch.get(batch.id) || []).length
         }))

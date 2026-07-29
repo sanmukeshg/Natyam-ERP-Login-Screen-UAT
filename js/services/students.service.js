@@ -21,7 +21,7 @@ import { sequenceNumber } from '../utils/id.js';
 import { recordAuditEntry } from '../data/auditLog.repository.firestore.js';
 import { localDate, nowISO, academicYearOf, ageFrom, daysBetween, addDays } from '../utils/date.js';
 import { formatMoney } from '../utils/money.js';
-import { STUDENT_STATUS, LEVELS, INVOICE_STATUS, levelLabel } from '../config/app.config.js';
+import { STUDENT_STATUS, LEVELS, INVOICE_STATUS, levelLabel, levelsLabel, levelsOf } from '../config/app.config.js';
 import {
     students$, batches$, invoices$, payments$, attendance$, certificates$,
     documents$, programs$, settings$, curricula$, branches$, AttendanceMath
@@ -36,12 +36,21 @@ import { studentFeeSummary, raiseSchedule } from './fees.service.js';
  * that lookup, so the schedule travels with the student instead. `null` for
  * a student not currently assigned to any batch.
  */
-export function batchScheduleOf(batch) {
+/**
+ * @param {object} batch
+ * @param {string|null} [studentLevel]  Milestone B1: a batch can now teach
+ *   several levels, but a student is still ever only at one — pass the
+ *   student's own `level` explicitly (the caller always has it) so the
+ *   portal's timetable shows the child's actual level, not the batch's
+ *   whole set. Falls back to the batch's first configured level only when
+ *   the caller genuinely has no student level in hand.
+ */
+export function batchScheduleOf(batch, studentLevel = null) {
     if (!batch) return null;
     return {
         batchId: batch.id,
         name: batch.name,
-        level: batch.level,
+        level: studentLevel || levelsOf(batch)[0] || null,
         days: batch.days,
         startTime: batch.startTime,
         endTime: batch.endTime
@@ -74,14 +83,17 @@ export async function enrol(data, { raiseFees = true } = {}) {
     const student = await students$.create({
         ...normalise(data),
         admissionNo: data.admissionNo || sequenceNumber('NAT/ADM', year, seq),
-        // A student created against a batch inherits that batch's branch and
-        // level. Letting the two disagree is how 1.0 produced students who
-        // appeared in no branch's list.
+        // A student created against a batch inherits that batch's branch.
+        // Level is the other way around since Milestone B1: a batch can now
+        // teach several levels, so the student's own explicit level (already
+        // known by this point — an admission always carries one) takes
+        // priority, falling back to the batch's first configured level only
+        // when the caller genuinely didn't specify one.
         branchId: batch?.branchId || data.branchId,
-        level: batch?.level || data.level,
+        level: data.level || levelsOf(batch)[0] || null,
         status: data.status || STUDENT_STATUS.ACTIVE,
         joinedOn: data.joinedOn || localDate(),
-        batchSchedule: batchScheduleOf(batch)
+        batchSchedule: batchScheduleOf(batch, data.level)
     });
 
     let billing = null;
@@ -127,14 +139,16 @@ export async function assignToBatch(studentId, batchId) {
     if (batch.status !== 'active') throw new Error(`${batch.name} is closed and cannot take students.`);
     assertBatchHasRoom(batch, await countInBatch(batchId, studentId));
 
-    if (batch.level !== student.level) {
+    // Milestone B1: a batch teaches a *set* of levels now — the student
+    // just needs to be at one of them, not the batch's single old level.
+    if (!levelsOf(batch).includes(student.level)) {
         throw new Error(
-            `${student.name} is at ${levelLabel(student.level)} and ${batch.name} teaches ${levelLabel(batch.level)}. ` +
-            'Promote the student first, or choose a batch at their level.'
+            `${student.name} is at ${levelLabel(student.level)} and ${batch.name} teaches ${levelsLabel(levelsOf(batch))}. ` +
+            'Promote the student first, or choose a batch that teaches their level.'
         );
     }
 
-    const updated = await students$.update(studentId, { batchId, branchId: batch.branchId, batchSchedule: batchScheduleOf(batch) });
+    const updated = await students$.update(studentId, { batchId, branchId: batch.branchId, batchSchedule: batchScheduleOf(batch, student.level) });
     bus.emit(EVENTS.STUDENT_UPDATED, { student: updated, before: student });
     return updated;
 }
@@ -469,10 +483,13 @@ export async function bulkAssign(studentIds, batchId) {
     if (batch.status !== 'active') throw new Error(`${batch.name} is closed.`);
 
     const records = await Promise.all(studentIds.map((id) => students$.findOrFail(id)));
-    const wrongLevel = records.filter((s) => s.level !== batch.level);
+    // Milestone B1: a batch teaches a *set* of levels now — a student just
+    // needs to be at one of them, not the batch's single old level.
+    const batchLevels = levelsOf(batch);
+    const wrongLevel = records.filter((s) => !batchLevels.includes(s.level));
     if (wrongLevel.length) {
         throw new Error(
-            `${wrongLevel.length} of the selected students are not at ${levelLabel(batch.level)}: ` +
+            `${wrongLevel.length} of the selected students are not at ${levelsLabel(batchLevels)}: ` +
             `${wrongLevel.slice(0, 3).map((s) => s.name).join(', ')}${wrongLevel.length > 3 ? '…' : ''}.`
         );
     }

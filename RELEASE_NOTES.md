@@ -1,3 +1,26 @@
+# Release Notes — NATYAM ERP v2.19.0
+
+**Release:** Milestone B1 — Multi-Level Batches
+**Date:** 28 July 2026
+**Baseline:** v2.18.0
+**Type:** Feature change. A batch can now be set up to teach more than one level at once, and the "students at a different level cannot join" restriction only applies when none of a batch's levels match.
+
+## What changed for the academy
+
+A batch used to be locked to exactly one level — useful for most classes, but wrong for the ones that genuinely mix levels together in one session. The Batches "Level" field is now a multi-select: tick every level a class actually teaches, and any student at one of those levels can be placed into it without the old rejection.
+
+## For administrators / IT
+
+- No manual step needed — no `firestore.rules` change, no forced migration.
+- Existing batches keep working exactly as before (still effectively one-level) until you next open and save them — at that point they pick up the new multi-select shape automatically.
+- If you remove a level from a batch that still has students enrolled at exactly that level, you'll be asked to move them first — the same protection as before, now scoped to the specific level being removed rather than any edit at all.
+
+## Quality
+
+- Static analysis clean: no import cycles, all imports resolve, no undefined identifiers.
+
+---
+
 # Release Notes — NATYAM ERP v2.18.0
 
 **Release:** Milestone P2 — Guardian Read Access to Attendance, Certificates, Fees

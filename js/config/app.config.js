@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.18.0',
+    version: '2.19.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -714,6 +714,27 @@ export function roleLabel(roleKey) {
  */
 export function levelLabel(value, fallback = null) {
     return curriculum().find((l) => l.value === value)?.label || value || fallback;
+}
+
+/** Milestone B1 (multi-level batches) — a batch's levelsOf() array, joined for display. */
+export function levelsLabel(values) {
+    return (values || []).map((v) => levelLabel(v)).join(', ');
+}
+
+/**
+ * Milestone B1 — a batch now teaches a *set* of levels, not one. Reads
+ * defensively: a batch document saved before this milestone still only
+ * carries the old single `level` field, and keeps working as a one-level
+ * batch until it's next edited and saved (which writes `levels` going
+ * forward) — no forced data migration for the handful of existing batches.
+ * Lives here, not in batches.service.js, so both batches.service.js and
+ * students.service.js can import it without creating a cycle between them
+ * (batches.service.js already imports batchScheduleOf() from
+ * students.service.js).
+ */
+export function levelsOf(batch) {
+    if (Array.isArray(batch?.levels)) return batch.levels;
+    return batch?.level ? [batch.level] : [];
 }
 
 /**

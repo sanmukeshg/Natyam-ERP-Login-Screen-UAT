@@ -26,7 +26,7 @@ import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatNumber } from '../../utils/money.js';
 import { localDate } from '../../utils/date.js';
-import { LEVELS } from '../../config/app.config.js';
+import { LEVELS, levelsOf } from '../../config/app.config.js';
 
 import {
     WEEK, listBatches, batchDetail, createBatch, updateBatch, closeBatch, reopenBatch
@@ -237,9 +237,10 @@ export default class BatchesPage extends Page {
                 hint: branches.length > 1 ? 'Which branch this batch runs at.' : null
             },
             {
-                name: 'level', label: 'Level', type: 'select', required: true, width: 'half', value: existing?.level,
+                name: 'levels', label: 'Levels', type: 'checkbox-group', required: true,
+                value: existing ? levelsOf(existing) : [],
                 options: LEVELS.map((l) => ({ value: l.value, label: l.label })),
-                hint: 'Only students at this level can be placed here.'
+                hint: 'Students at any of these levels can be placed here.'
             },
             {
                 name: 'teacherId', label: 'Teacher', type: 'select', width: 'half', value: existing?.teacherId,
@@ -378,7 +379,7 @@ export default class BatchesPage extends Page {
                 <div class="card"><div class="card-body">
                     ${summaryList([
                         ['Code', batch.code],
-                        ['Level', batch.levelLabel],
+                        ['Levels', batch.levelLabel],
                         ['Schedule', batch.schedule],
                         ['Teacher', detail.teacher?.name],
                         ['Running since', batch.startsOn],

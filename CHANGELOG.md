@@ -9,6 +9,26 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.19.0] — 2026-07-28 — Milestone B1: Multi-Level Batches
+
+A batch used to teach exactly one level, enforced hard everywhere a student was placed into one — but a single class often genuinely mixes students across two or three adjacent levels. A batch now teaches a *set* of levels.
+
+### Added
+- **`batches.page.js`'s Level field is now a multi-select checkbox-group** (reusing the exact field type already proven on this same form's Days field), so a batch can be created or edited with any combination of levels.
+- **`levelsOf(batch)` and `levelsLabel(levels)`** (`app.config.js`) — a batch document saved before this release still only carries the old single `level` field and keeps working as a one-level batch until it's next edited and saved (which writes the new `levels` array going forward). No forced data migration.
+
+### Changed
+- **Student placement is now set-membership, not equality.** `students.service.js#assignToBatch()`/`bulkAssign()` now check whether a student's level is *any one* of a batch's configured levels, not whether it equals the batch's single level — this is the restriction lifted.
+- **`batches.service.js#updateBatch()`'s level-change guard is now removal-aware.** Adding a level to an already-populated batch is always safe and never blocked; only *removing* a level that a currently-enrolled student is still at is blocked, naming that level and those students specifically.
+- **`batches.service.js#closeBatch()`'s roster-move check is now per-student.** Moving a closing batch's roster to another batch checks each actual student's own level against the target's levels, not a batch-to-batch level comparison — more correct for a multi-level source batch whose roster may only occupy a subset of its configured levels.
+- **`admissions.service.js#eligibleBatches()`** now correctly recognises a multi-level batch as matching an applicant's level — this was already a soft sort/label hint, not a hard filter, so it only gets more accurate.
+- Every display site (Batches table/detail, Timetable, Students/Admissions batch pickers, header search) shows a comma-joined multi-level label instead of a single one.
+
+### Manual steps before this works
+- None — pure application-layer change, no `firestore.rules` change, no forced migration.
+
+---
+
 ## [2.18.0] — 2026-07-28 — Milestone P2: Guardian Read Access to Attendance, Certificates, Fees
 
 With the guardian portal now genuinely reachable (v2.17.3–v2.17.6), the three pages that could never work — Attendance, Certificates, Fees — are built out, closing the gap `firestore.rules`' own header comment flagged as follow-up work back on 2026-07-27.
