@@ -39,12 +39,13 @@ import { formOverlay } from '../../ui/form.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatNumber } from '../../utils/money.js';
-import { formatDate, formatDateLong, localDate, addDays, monthKey, formatMonth } from '../../utils/date.js';
+import { formatDate, formatDateLong, localDate, addDays, monthKey, formatMonth, parseDate } from '../../utils/date.js';
 import { ATTENDANCE_STATUS } from '../../config/app.config.js';
 import { holidays$ } from '../../data/repositories.js';
 
 import {
-    openRegister, dayBoard, postRegister, monthlyGrid, missingRegisters
+    openRegister, dayBoard, postRegister, monthlyGrid, missingRegisters,
+    batchCalendar, MARKING_WINDOW_DAYS, markingWindow
 } from '../../services/attendance.service.js';
 import { listBatches } from '../../services/batches.service.js';
 import { postponeSession, cancelSession } from '../../services/session.service.js';
@@ -114,14 +115,11 @@ export default class AttendancePage extends Page {
             this.batchId ? this.openBatchRegister(this.batchId) : this.loadBoard();
         }));
         this.onDispose(on(this.container, 'click', '[data-action="month"]', () => this.monthView()));
+        this.onDispose(on(this.container, 'click', '[data-action="class-dates"]', () => this.openClassDates()));
         this.onDispose(on(this.container, 'click', '[data-action="missing"]', () => this.openMissingRegisters()));
         this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
             this.openBatchRegister(target.dataset.openBatch)));
-        this.onDispose(on(this.container, 'click', '[data-action="back"]', () => {
-            const back = previousPath();
-            if (back) router.go(back);
-            else router.go('/timetable');
-        }));
+        this.onDispose(on(this.container, 'click', '[data-action="back"]', () => this.leaveRegister()));
         this.onDispose(on(this.container, 'click', '[data-postpone]', (event, target) => {
             event.stopPropagation();
             this.postponeSlot(target.dataset.postpone, target.dataset.date);
@@ -131,7 +129,39 @@ export default class AttendancePage extends Page {
             this.cancelSlot(target.dataset.cancelSession, target.dataset.date);
         }));
 
-        this.events.on(EVENTS.BRANCH_CHANGED, () => { this.batchId = null; this.loadBoard(); });
+        this.events.on(EVENTS.BRANCH_CHANGED, () => {
+            // A different branch has an entirely different outstanding list.
+            this.invalidateMissing();
+
+            // A register belongs to one batch in one branch. Switching branch
+            // while marking one used to silently drop any unsaved marks and
+            // land the user on the day board — the screen this workflow is
+            // supposed to keep out of the way. Leaving the way the Back
+            // button does is both honest about what happened and consistent
+            // with every other exit from this page.
+            if (this.batchId) {
+                this.leaveRegister();
+                return;
+            }
+            this.loadBoard();
+        });
+    }
+
+    /**
+     * The single exit from a register: back where the user came from, or the
+     * Timetable, which is the only screen that is *meant* to lead here.
+     *
+     * The day board is still reachable (a bare `/attendance` renders it, and
+     * the handful of legacy shortcuts still land on it) but nothing in this
+     * page routes to it deliberately any more. It is a fallback, not a
+     * destination.
+     */
+    leaveRegister() {
+        const back = previousPath();
+        // Never bounce from one register into another: after postponing a
+        // class, "back" landing on a different roll call would read as the
+        // postpone having done something to *that* class instead.
+        router.go(back && !back.startsWith('/attendance') ? back : '/timetable');
     }
 
     /* ------------------------------------------------------------- DAY BOARD */
@@ -257,19 +287,117 @@ export default class AttendancePage extends Page {
 
         const reg = this.register;
         const inactive = reg.sessionStatus === 'postponed' || reg.sessionStatus === 'cancelled';
-        if (!session.can('student.edit') || inactive) {
-            render(slot, '');
+        // Class dates stays available whatever the session's status — it is
+        // how you get *away* from a cancelled or postponed date to a real
+        // one, so hiding it exactly when the date is wrong would be backwards.
+        const showPostponeCancel = session.can('student.edit') && !inactive;
+
+        render(slot, html`
+            <button class="btn btn-sm btn-secondary" data-action="class-dates">
+                ${raw(icon('calendar', { size: 15 }))} Class dates
+            </button>
+            ${showPostponeCancel ? html`
+                <button class="btn btn-sm btn-secondary" data-postpone="${reg.batch.id}" data-date="${this.date}">
+                    Postpone
+                </button>
+                <button class="btn btn-sm btn-secondary" data-cancel-session="${reg.batch.id}" data-date="${this.date}">
+                    Cancel
+                </button>
+            ` : ''}
+        `);
+    }
+
+    /* ------------------------------------------------------- CLASS-DATE PICKER */
+
+    /**
+     * A month grid of this batch's real class days.
+     *
+     * The native date input stays exactly where it is — on a phone its OS
+     * picker is the better control, and this screen is used one-handed at the
+     * edge of a hall. This sits alongside it for the question the native
+     * input cannot answer: which of these days did this batch actually meet?
+     */
+    async openClassDates(month = monthKey(parseDate(this.date))) {
+        let calendar;
+        try {
+            calendar = await batchCalendar({ batchId: this.batchId, month });
+        } catch (err) {
+            toast.error(err.message);
             return;
         }
 
-        render(slot, html`
-            <button class="btn btn-sm btn-secondary" data-postpone="${reg.batch.id}" data-date="${this.date}">
-                Postpone
-            </button>
-            <button class="btn btn-sm btn-secondary" data-cancel-session="${reg.batch.id}" data-date="${this.date}">
-                Cancel
-            </button>
-        `);
+        await drawer({
+            title: 'Class dates',
+            description: `${calendar.batch.name} — days this batch met. Pick one to open its register.`,
+            size: 'sm',
+            content: this.calendarView(calendar),
+            actions: [{ label: 'Close', variant: 'secondary', value: null }],
+            onMount: (body, api) => {
+                on(body, 'click', '[data-month-shift]', async (_e, target) => {
+                    const shift = Number(target.dataset.monthShift);
+                    const [y, m] = calendar.month.split('-').map(Number);
+                    const next = monthKey(new Date(y, m - 1 + shift, 1));
+                    api.close(null);
+                    await this.openClassDates(next);
+                });
+                on(body, 'click', '[data-pick-date]', (_e, target) => {
+                    api.close(null);
+                    this.goToRegister(this.batchId, target.dataset.pickDate);
+                });
+            }
+        });
+    }
+
+    calendarView(calendar) {
+        // Monday-first, matching the timetable and the Indian school week.
+        const lead = (calendar.days[0].weekday + 6) % 7;
+
+        return html`
+            <div class="spread mb-4">
+                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="-1" aria-label="Previous month">
+                    ${raw(icon('chevron-left', { size: 15 }))}
+                </button>
+                <span class="type-strong">${formatMonth(calendar.month)}</span>
+                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="1" aria-label="Next month">
+                    ${raw(icon('chevron-right', { size: 15 }))}
+                </button>
+            </div>
+
+            <div class="calendar-grid">
+                ${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => html`
+                    <span class="calendar-heading">${d}</span>
+                `)}
+                ${Array.from({ length: lead }, () => html`<span></span>`)}
+                ${calendar.days.map((day) => {
+                    if (!day.hasClass) {
+                        return html`<span class="calendar-day" data-state="none">${day.dayOfMonth}</span>`;
+                    }
+                    const state = day.status === 'cancelled' ? 'cancelled'
+                        : day.status === 'postponed' ? 'postponed'
+                        : day.marked ? 'marked'
+                        : day.markable ? 'pending' : 'locked';
+                    const title = `${formatDate(day.date)} — ${
+                        state === 'cancelled' ? 'cancelled'
+                        : state === 'postponed' ? 'postponed to another date'
+                        : state === 'marked' ? 'register marked'
+                        : state === 'pending' ? 'not marked yet'
+                        : 'outside the correction window'}`;
+                    return html`
+                        <button class="calendar-day" data-state="${state}" data-pick-date="${day.date}"
+                                title="${title}" aria-label="${title}">
+                            ${day.dayOfMonth}${day.isReplacement ? html`<span class="calendar-dot"></span>` : ''}
+                        </button>`;
+                })}
+            </div>
+
+            <ul class="stack stack-xs mt-4 type-caption type-muted">
+                <li><span class="calendar-key" data-state="marked"></span> Register marked</li>
+                <li><span class="calendar-key" data-state="pending"></span> Class held, not yet marked</li>
+                <li><span class="calendar-key" data-state="cancelled"></span> Cancelled</li>
+                <li><span class="calendar-key" data-state="postponed"></span> Postponed — mark its replacement</li>
+                <li><span class="calendar-key" data-state="none"></span> No class</li>
+            </ul>
+        `;
     }
 
     async postponeSlot(batchId, date) {
@@ -291,8 +419,13 @@ export default class AttendancePage extends Page {
         });
         if (done) {
             toast.success('Class postponed — a replacement has been scheduled.');
-            this.batchId = null;
-            await this.loadBoard();
+            // The original drops off the outstanding list and the replacement
+            // joins it, both only visible after a refetch.
+            this.invalidateMissing();
+            // Back to the Timetable, where the replacement is now visible on
+            // its new date. This used to drop the user on the day board with
+            // the toast still showing and no sign of where the class went.
+            this.leaveRegister();
         }
     }
 
@@ -312,32 +445,60 @@ export default class AttendancePage extends Page {
         });
         if (done) {
             toast.success('Class cancelled.');
-            this.batchId = null;
-            await this.loadBoard();
+            this.invalidateMissing();
+            this.leaveRegister();
         }
     }
 
     /* ------------------------------------------------------------ MISSING REGISTERS */
 
+    /**
+     * Cached, because this is not a cheap question any more and it is asked
+     * on every board load and every register open.
+     *
+     * Widening the window from 7 days to the full 30 the service actually
+     * allows marking within — necessary, since a 20-day-old register was
+     * markable and listed nowhere — multiplied the attendance rows this
+     * reads by roughly four, and added a second range query for sessions on
+     * top. Firestore bills every one of those documents, and this project
+     * has already run a free tier dry once. The answer only changes when
+     * something on this page changes it, so it is fetched once and
+     * invalidated deliberately (see invalidateMissing()).
+     */
     refreshMissingBadge() {
-        missingRegisters({ days: 7, branchId: session.branch() })
+        if (this.missing) {
+            this.paintMissingBadge(this.missing);
+            return;
+        }
+
+        missingRegisters({ branchId: session.branch() })
             .then((missing) => {
+                if (this.disposed) return;
                 this.missing = missing;
-                const btn = this.container.querySelector('[data-action="missing"]');
-                if (!btn) return;
-                render(btn, html`
-                    ${raw(icon('alert-circle', { size: 15 }))} Missing registers
-                    ${missing.length ? html`<span class="badge badge-warning ml-1">${missing.length}</span>` : ''}
-                `);
+                this.paintMissingBadge(missing);
             })
             .catch((err) => console.error(err));
+    }
+
+    paintMissingBadge(missing) {
+        const btn = this.container.querySelector('[data-action="missing"]');
+        if (!btn) return;
+        render(btn, html`
+            ${raw(icon('alert-circle', { size: 15 }))} Missing registers
+            ${missing.length ? html`<span class="badge badge-warning ml-1">${missing.length}</span>` : ''}
+        `);
+    }
+
+    /** Anything that could add to or clear the outstanding list calls this. */
+    invalidateMissing() {
+        this.missing = null;
     }
 
     async openMissingRegisters() {
         let missing = this.missing;
         if (!missing) {
             try {
-                missing = await missingRegisters({ days: 7, branchId: session.branch() });
+                missing = await missingRegisters({ branchId: session.branch() });
             } catch (err) {
                 toast.error(err.message);
                 return;
@@ -346,7 +507,8 @@ export default class AttendancePage extends Page {
 
         await drawer({
             title: 'Missing registers',
-            description: 'Registers not yet marked in the last 7 days.',
+            description: `Registers still unmarked, within the ${MARKING_WINDOW_DAYS}-day correction window. `
+                + 'Postponed and cancelled classes are not listed — there is nothing to mark against them.',
             size: 'sm',
             content: missing.length ? html`
                 <ul class="stack stack-sm">
@@ -354,7 +516,13 @@ export default class AttendancePage extends Page {
                         <li class="spread">
                             <div>
                                 <span class="type-strong">${entry.batch.name}</span>
-                                <div class="type-caption type-muted">${formatDate(entry.date)}</div>
+                                ${entry.isReplacement ? html`
+                                    <span class="badge badge-warning badge-sm">Rescheduled</span>
+                                ` : ''}
+                                <div class="type-caption type-muted">
+                                    ${formatDate(entry.date)} ·
+                                    ${entry.age === 0 ? 'today' : `${entry.age} day${entry.age === 1 ? '' : 's'} ago`}
+                                </div>
                             </div>
                             <button class="btn btn-sm btn-secondary" data-mark="${entry.batch.id}" data-date="${entry.date}">
                                 Mark
@@ -364,7 +532,9 @@ export default class AttendancePage extends Page {
                 </ul>
             ` : html`
                 <div class="empty empty-compact">
-                    <p class="empty-text">Nothing outstanding — every register in the last 7 days is marked.</p>
+                    <p class="empty-text">
+                        Nothing outstanding — every register in the last ${MARKING_WINDOW_DAYS} days is marked.
+                    </p>
                 </div>
             `,
             actions: [{ label: 'Close', variant: 'secondary', value: null }],
@@ -382,6 +552,70 @@ export default class AttendancePage extends Page {
         const input = this.container.querySelector('[data-role="date"]');
         if (input) input.value = date;
         this.openBatchRegister(batchId);
+    }
+
+    /**
+     * The one banner that explains why this particular date may not accept a
+     * save. Ordered most-final first: a cancelled or postponed session can
+     * never be marked here no matter what, so those outrank "outside the
+     * correction window", which in turn outranks "the batch doesn't normally
+     * meet today" — the only one of the four that is merely unusual rather
+     * than actually refused.
+     */
+    registerWarning(reg) {
+        const mark = markingWindow(this.date);
+
+        if (reg.sessionStatus === 'cancelled') {
+            return html`
+                <div class="alert alert-danger">
+                    <div class="alert-title">This class was cancelled</div>
+                    <p class="alert-body">
+                        Attendance can never be recorded against a cancelled class. Nothing saved here will be kept.
+                    </p>
+                </div>`;
+        }
+
+        if (reg.sessionStatus === 'postponed') {
+            return html`
+                <div class="alert alert-danger">
+                    <div class="alert-title">This class was postponed</div>
+                    <p class="alert-body">
+                        Mark the replacement class instead — it carries this class's register.
+                        Saving here will be refused.
+                    </p>
+                </div>`;
+        }
+
+        if (!mark.markable) {
+            return html`
+                <div class="alert alert-warning">
+                    <div class="alert-title">${mark.reason === 'future' ? 'Not yet' : 'Too old to mark'}</div>
+                    <p class="alert-body">${mark.message}</p>
+                </div>`;
+        }
+
+        // Scheduled comes from the batch's recurring weekly pattern; a
+        // replacement legitimately lands on a day it does not cover, and
+        // `postponedFrom` already explains that case in its own banner
+        // above, so this would only repeat it.
+        if (!reg.scheduled && !reg.postponedFrom) {
+            // Short, fixed title. `.alert` lays title and body out side by
+            // side and the title does not shrink, so interpolating a batch
+            // name here squeezed the explanation into a one-word-per-line
+            // column that ran off the side of a phone. The specifics belong
+            // in the sentence anyway.
+            return html`
+                <div class="alert alert-warning">
+                    <div class="alert-title">No class scheduled</div>
+                    <p class="alert-body">
+                        ${reg.batch.name} does not normally meet on a ${reg.dayName}. Marking is still
+                        allowed for a make-up class that genuinely went ahead — check the date first if
+                        that is not what you meant to do.
+                    </p>
+                </div>`;
+        }
+
+        return '';
     }
 
     paintRegister() {
@@ -408,6 +642,17 @@ export default class AttendancePage extends Page {
                     <p class="alert-body">This class was postponed from ${formatDate(reg.postponedFrom)}.</p>
                 </div>
             ` : ''}
+
+            ${/* The register used to open silently on any date at all: a
+                  Sunday for a Mon/Wed batch, a class that was cancelled a
+                  fortnight ago, a date six months back. openRegister() has
+                  always returned `scheduled` and `sessionStatus` saying
+                  exactly that, and this page simply never read either one —
+                  so the first anyone heard of it was postRegister() refusing
+                  the save. Warned, never blocked: marking a make-up class on
+                  a day the batch does not normally meet is legitimate and
+                  the whole reason the roll call stays available below. */''}
+            ${this.registerWarning(reg)}
 
             ${reg.alreadyMarked ? html`
                 <div class="alert alert-info">
@@ -546,6 +791,8 @@ export default class AttendancePage extends Page {
                 ? `Register corrected — ${result.corrections} mark${result.corrections === 1 ? '' : 's'} changed.`
                 : 'Register saved.');
 
+            // This register just stopped being missing.
+            this.invalidateMissing();
             await this.openBatchRegister(this.register.batch.id);
         } catch (err) {
             toast.error(err.message);

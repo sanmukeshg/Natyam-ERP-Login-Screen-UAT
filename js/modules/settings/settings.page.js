@@ -11,12 +11,17 @@
  * set up. Nine sidebar entries for tasks done twice a year would crowd out the
  * ones done twice an hour.
  *
- * Two tabs deserve a note. **Roles** is read-only: capabilities are declared in
- * app.config and a role editor would let an owner lock themselves out of their
- * own database with no server to appeal to. **Data** is where the honest
- * warning lives — this app's records exist in one browser on one machine, and
- * a user who does not understand that will not take backups until the day they
- * need one.
+ * Two tabs deserve a note. **Roles** is read-only, and the reason is
+ * structural rather than cautious: `firestore.rules` decides access from the
+ * role's *name* (`myRole() == 'administrator'`, and so on) and has no notion
+ * of a capability list at all. An editor here would change what this
+ * application believes without changing what the database enforces, so every
+ * newly granted permission would surface as a button that fails on click.
+ * Both halves have to move together; see docs/architecture/IAM_ROLE_MODEL.md.
+ * **Data** is where the honest warning lives about backups.
+ *
+ * Tabs are capability-filtered (see TABS below) — holding `settings.view` is
+ * what gets someone onto this page, not what entitles them to every tab on it.
  */
 
 import { Page } from '../../core/router.js';
@@ -31,7 +36,7 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatMoney, formatNumber } from '../../utils/money.js';
 import { formatDate, formatDateTime, relativeTime, localDate } from '../../utils/date.js';
-import { APP, STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY, SETTINGS_GROUPS } from '../../config/app.config.js';
+import { APP, STORE_NAMES, DURATION_UNITS, curriculum, levelLabel, roleTable, roleLabel, exposedFeeFrequencies, DEFAULT_FEE_FREQUENCY, SETTINGS_GROUPS, CAPABILITIES } from '../../config/app.config.js';
 
 import {
     institute, updateInstitute, listBranches, createBranch, updateBranch, closeBranch,
@@ -54,23 +59,57 @@ import { setOwnPassword } from '../../services/auth.service.js';
 import { backupStatus, downloadBackup, inspectBackup, restore, exportStore, resetEverything } from '../../services/backup.service.js';
 import { IMPORTERS, readFile, dryRun, commit } from '../../services/import.service.js';
 
+/**
+ * The tabs, and what each one needs to be worth opening.
+ *
+ * `settings.view` gets somebody as far as this page; it does not mean every
+ * tab on it is theirs. A Viewer holds `settings.view` and nothing else here,
+ * so before this list carried capabilities they were shown all nine — and
+ * clicking Audit log threw `session.require('audit.view')` in their face,
+ * which is the "module still exists for users and it says no permission"
+ * complaint exactly. A tab nobody can open is not a feature, it is a dead end
+ * advertised as one.
+ *
+ * `cap: null` means the page-level `settings.view` check is the only gate.
+ * An array means any one of them is enough — the Data tab is useful to
+ * somebody who can take a backup even if they may not restore one.
+ *
+ * These hide tabs; they do not secure them. Every panel keeps its own
+ * `session.require()` and firestore.rules keeps its own opinion — this is the
+ * layer that stops people being shown doors they cannot walk through, not the
+ * lock on the door.
+ */
 const TABS = [
-    { key: 'institute', label: 'Institute' },
-    { key: 'branches', label: 'Branches' },
-    { key: 'fees', label: 'Fee plans' },
-    { key: 'curriculum', label: 'Curriculum' },
-    { key: 'users', label: 'Users' },
-    { key: 'roles', label: 'Roles' },
-    { key: 'preferences', label: 'Preferences' },
-    { key: 'audit', label: 'Audit log' },
-    { key: 'data', label: 'Data' }
+    { key: 'institute', label: 'Institute', cap: null },
+    { key: 'branches', label: 'Branches', cap: null },
+    { key: 'fees', label: 'Fee plans', cap: null },
+    { key: 'curriculum', label: 'Curriculum', cap: null },
+    { key: 'users', label: 'Users', cap: CAPABILITIES.USER_VIEW },
+    { key: 'roles', label: 'Roles', cap: null },
+    { key: 'preferences', label: 'Preferences', cap: null },
+    { key: 'audit', label: 'Audit log', cap: CAPABILITIES.AUDIT_VIEW },
+    { key: 'data', label: 'Data',
+      cap: [CAPABILITIES.BACKUP_CREATE, CAPABILITIES.DATA_EXPORT, CAPABILITIES.DATA_RESTORE] }
 ];
+
+/** The tabs this caller can actually open. */
+function visibleTabs() {
+    return TABS.filter((tab) => {
+        if (!tab.cap) return true;
+        return Array.isArray(tab.cap) ? session.canAny(...tab.cap) : session.can(tab.cap);
+    });
+}
 
 export default class SettingsPage extends Page {
     constructor(context) {
         super(context);
         this.title = 'Settings';
-        this.tab = this.query.tab || 'institute';
+        this.tabs = visibleTabs();
+        // A `?tab=` naming something this caller cannot open — a stale
+        // bookmark, or a link shared by an Administrator — lands on the first
+        // tab they can, rather than rendering an empty panel or throwing.
+        const asked = this.query.tab || 'institute';
+        this.tab = this.tabs.some((t) => t.key === asked) ? asked : this.tabs[0]?.key;
         this.auditFilters = { entity: '', action: '', from: '', to: '' };
     }
 
@@ -93,7 +132,7 @@ export default class SettingsPage extends Page {
             </header>
             <div class="page-body">
                 <div class="tabs tabs-scroll" role="tablist">
-                    ${TABS.map((tab) => html`
+                    ${this.tabs.map((tab) => html`
                         <button class="tab ${tab.key === this.tab ? 'is-active' : ''}" role="tab"
                                 aria-selected="${tab.key === this.tab}" data-tab="${tab.key}">${tab.label}</button>
                     `)}
@@ -1081,13 +1120,29 @@ export default class SettingsPage extends Page {
         const matrix = roleMatrix();
 
         return html`
+            <div class="alert alert-info">
+                <div class="alert-title">This table is read-only, including for an Administrator</div>
+                <p class="alert-body">
+                    What a role may do is enforced twice: once in this application, and once by the
+                    database's own security rules, which are the real boundary and which decide access
+                    from the role's <em>name</em> rather than from any list kept here. Editing this
+                    table alone would therefore show people buttons the database would still refuse —
+                    a worse outcome than showing the limits plainly. Making roles genuinely editable
+                    means changing both halves together, and is planned as its own piece of work.
+                </p>
+                <p class="alert-body">
+                    <strong>To change what somebody can do, change their role</strong> in
+                    ${session.can(CAPABILITIES.USER_VIEW)
+                        ? html`<a href="#/settings?tab=users">Settings → Users</a>`
+                        : 'Settings → Users'}. The four roles below are fixed; who holds them is not.
+                </p>
+            </div>
+
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">What each role can do</h2>
                     <p class="card-subtitle">
-                        Capabilities are declared in the application. They are shown here so it is clear
-                        what a role means before someone is given it. Changing a role definition is
-                        Administrator-only and is not done from this screen.
+                        Shown here so it is clear what a role means before someone is given it.
                         <strong>${SETTINGS_GROUPS.business.label}</strong> (this tab, branches, fee plans,
                         curriculum, master data, announcements) is Owner and Administrator alike;
                         <strong>${SETTINGS_GROUPS.system.label}</strong> (Firebase, API and environment
@@ -1194,7 +1249,15 @@ export default class SettingsPage extends Page {
                             <select class="select" data-pref="landingRoute">
                                 ${[
                                     { value: '/', label: 'Dashboard' },
-                                    { value: '/attendance', label: 'Attendance' },
+                                    // Timetable replaces Attendance here: the
+                                    // Attendance route is no longer a screen
+                                    // anyone navigates *to* (it is reached from
+                                    // a timetable tile), so offering it as a
+                                    // landing page would drop someone straight
+                                    // onto the fallback day board every morning.
+                                    // An existing '/attendance' preference still
+                                    // resolves — it just isn't offered any more.
+                                    { value: '/timetable', label: 'Timetable' },
                                     { value: '/students', label: 'Students' },
                                     { value: '/fees', label: 'Fees' }
                                 ].map((option) => html`
@@ -1487,12 +1550,20 @@ export default class SettingsPage extends Page {
             return;
         }
 
+        // `totalRecords` and `counts` are what summarise() actually returns —
+        // this read `inspection.recordCount` and `inspection.summary.students`,
+        // neither of which has ever existed on the inspection object, so the
+        // dialog told every user their backup held "0 records" immediately
+        // before asking them to replace the database with it.
+        const total = inspection.totalRecords || 0;
+        const students = inspection.counts?.students || 0;
+
         const confirmed = await confirmTyped({
             title: 'Replace everything with this backup?',
             message: [
                 `This file was taken on ${formatDateTime(inspection.backup.takenAt)}`,
-                `and holds ${formatNumber(inspection.recordCount)} records`,
-                inspection.summary?.students ? `including ${inspection.summary.students} students.` : '.',
+                `and holds ${formatNumber(total)} records`,
+                students ? `including ${formatNumber(students)} students.` : '.',
                 '',
                 'Everything the school currently holds will be replaced.',
                 'A safety copy of the current data will download first.',
@@ -1504,27 +1575,90 @@ export default class SettingsPage extends Page {
 
         if (!confirmed) return;
 
+        // Accounts are asked about separately, and only when the file
+        // actually carries any. Rolling records back to last month is a
+        // routine correction; rolling *access* back to last month is a
+        // different decision — it reinstates people who have since left,
+        // and it can change roles under everyone's feet. Defaults to no.
+        const accountCount = inspection.counts?.users || 0;
+        let restoreUsers = false;
+        if (accountCount) {
+            restoreUsers = await confirm({
+                title: 'Also restore sign-in accounts?',
+                message: `This backup holds ${formatNumber(accountCount)} sign-in `
+                    + `account${accountCount === 1 ? '' : 's'}. Restoring them reinstates the roles and access `
+                    + 'as they were when the backup was taken. Your own account is never changed, and no '
+                    + 'existing account is deleted.',
+                detail: 'If you are correcting the school\'s records rather than rebuilding the system, '
+                    + 'choose "Records only".',
+                confirmLabel: 'Records and accounts',
+                cancelLabel: 'Records only'
+            });
+        }
+
         try {
-            const result = await restore(inspection.backup, { safetyCopy: true });
-            toast.success(`Restored ${formatNumber(result.restored ?? inspection.recordCount)} records.`);
+            const result = await restore(inspection.backup, { safetyCopy: true, restoreUsers });
+            const accounts = result.usersRestored
+                ? ` ${formatNumber(result.usersRestored.written)} account${result.usersRestored.written === 1 ? '' : 's'} restored`
+                  + `${result.usersRestored.skipped ? ' (yours left unchanged).' : '.'}`
+                : '';
+            toast.success(`Restored ${formatNumber(result.totalRecords ?? total)} records.${accounts}`);
             setTimeout(() => window.location.reload(), 1200);
         } catch (err) {
+            console.error(err);
             toast.error(err.message);
         }
     }
 
+    /**
+     * The dialog states what survives as plainly as what does not. An erase
+     * that quietly keeps sign-in accounts is the right behaviour — wiping
+     * them would lock everyone out of the installation with no way back —
+     * but leaving that unsaid is how a user ends up believing every trace of
+     * the school is gone when their colleagues can all still sign in.
+     */
     async resetFlow() {
         const confirmed = await confirmTyped({
             title: 'Erase every record?',
-            message: 'Every student, payment, register, certificate and ledger entry the school holds will '
-                + 'be deleted. A safety copy downloads first, and it will be the only copy left.',
+            message: [
+                'Every student, admission, register, invoice, payment, certificate, ledger entry',
+                'and audit row the school holds will be deleted from the database.',
+                '',
+                'Sign-in accounts are kept, so you and your colleagues can still log in',
+                'to an empty system. Nothing else survives.',
+                '',
+                'A safety copy downloads first, and it will be the only copy left.'
+            ].join(' '),
             phrase: 'ERASE',
             confirmLabel: 'Erase everything'
         });
         if (!confirmed) return;
 
-        await resetEverything({ safetyCopy: true });
-        toast.success('Everything erased. Reloading.');
+        let result;
+        try {
+            result = await resetEverything({ safetyCopy: true });
+        } catch (err) {
+            // Without this the erase could fail outright and say nothing at
+            // all — the page simply wouldn't reload, which reads as "still
+            // working" rather than "failed".
+            console.error(err);
+            toast.error(`The erase could not be completed: ${err.message}`);
+            return;
+        }
+
+        if (!result.ok) {
+            // A partial erase cannot be rolled back — there is no
+            // cross-collection transaction — so say exactly which sections
+            // are still holding data rather than reporting a clean success.
+            const stuck = result.failed.map((f) => f.store).join(', ');
+            toast.error(
+                `Erased ${result.cleared.length} of ${result.cleared.length + result.failed.length} sections. `
+                + `Still holding data: ${stuck}. Check the console and try again.`
+            );
+            return;
+        }
+
+        toast.success(`Erased ${result.cleared.length} sections. Sign-in accounts kept. Reloading.`);
         setTimeout(() => window.location.reload(), 1200);
     }
 

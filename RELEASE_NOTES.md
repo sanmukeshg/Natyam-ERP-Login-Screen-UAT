@@ -1,3 +1,36 @@
+# Release Notes — NATYAM ERP v2.24.0
+
+**Release:** Erase, Attendance session-awareness, self-service profile
+**Date:** 30 July 2026
+**Baseline:** v2.23.1
+**Type:** Bugfix and enhancement round — five phases from a UAT observation document, reviewed and approved before implementation.
+
+## What changed for the academy
+
+- **"Erase everything" now actually erases everything.** It had been clearing local browser storage only — every real record in the cloud database survived an erase while the app reported success. Fixed at the root: each collection is now cleared through its own data layer. Sign-in accounts are deliberately kept, so nobody gets locked out of an emptied system, and the confirmation dialog says so plainly.
+- **Backups now include who has an account**, not just the school's records. Restoring accounts from a backup is a separate choice offered during restore, and your own account is never touched by it.
+- **The Missing Registers list now agrees with what can actually be marked.** A postponed or cancelled class no longer appears (it can never be marked again); a rescheduled class now does appear on its new date, which it never did before — that unmarked register was previously invisible.
+- **The Timetable shows which week you're looking at, and lets you move between weeks.** Tiles for a week too far in the future or too far in the past are labelled as such, rather than failing only when you try to save.
+- **Opening a student from a batch's roll now stays in the batch** and shows that student's attendance for the month — present/absent counts, a percentage, and month-by-month navigation — instead of leaving for the Students screen.
+- **Every signed-in person can now open "My account"** from the profile button, whatever their role, and change their own password there. Previously the button sent Teacher & Reception staff to a screen they were not permitted to open at all, with no way back to fix a forgotten password except signing out.
+- **Settings only shows the tabs a role can actually use.** A Viewer no longer sees Users, Audit log or Data tabs they cannot open.
+- **The read-only Roles screen now explains why it's read-only**, and points to Settings → Users, where who holds each role is genuinely editable.
+
+## For administrators / IT
+
+- **No `firestore.rules` change.** Every fix in this release is application-layer; the rules published for v2.23.0 still govern the database unchanged.
+- **The erase fix changes real behaviour** — verify it against a disposable project or a restorable backup before relying on it, not against live data you cannot rebuild.
+- Making the Roles matrix genuinely editable was considered and explicitly deferred: `firestore.rules` decides access by role name, not by a capability list, so an editor here alone would show permissions the database still refuses. Recorded as a future milestone requiring a rules rewrite and a test harness first (`docs/architecture/IAM_ROLE_MODEL.md` §6).
+- One pre-existing issue found and left alone, outside this round's approved scope: three screens pass a full timestamp to a date formatter that expects a bare date, and silently show the 1st of the month instead of the real day.
+
+## Quality
+
+- Static analysis clean across 130 modules: no import cycles, all imports resolve, no undefined identifiers, no undefined CSS classes.
+- Verified in-browser at every phase: all four roles' capability sets, all 18 staff pages and 6 guardian-portal pages load with zero console errors, dark mode and mobile-width (375px) rendering for every new screen and drawer.
+- Not verified: behaviour against live Firestore data (the erase, the restore, a real password change, Mobile OTP). A UAT plan with 60 numbered test cases and explicit pass/fail criteria was provided separately for that pass.
+
+---
+
 # Release Notes — NATYAM ERP v2.23.1
 
 **Release:** Remove IndexedDB-era claims from the UI

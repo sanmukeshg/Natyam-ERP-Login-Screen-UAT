@@ -30,7 +30,49 @@ import { session } from '../core/session.js';
 import { localDate, nowISO, addDays, daysBetween, monthKey, dayName, startOfMonth, endOfMonth, lastMonths } from '../utils/date.js';
 import { ATTENDANCE_STATUS } from '../config/app.config.js';
 import { attendance$, students$, batches$, staff$, AttendanceMath } from '../data/repositories.js';
-import { isScheduledClassDay, resolveSession, completeSession, sessionStatusOf } from './session.service.js';
+import { isScheduledClassDay, resolveSession, completeSession, sessionStatusOf, sessionMap } from './session.service.js';
+
+/**
+ * How far back a register may be marked or corrected — and therefore, of
+ * necessity, how far back one can still be *reported* as missing.
+ *
+ * These were three different numbers: postRegister() refused anything older
+ * than 30 days, missingRegisters() defaulted to 14, and the Attendance page
+ * asked it for 7. A register nineteen days old was perfectly markable and
+ * appeared on no list that would ever tell anyone it needed marking. One
+ * constant, so the window a teacher is chased about and the window they are
+ * allowed to act in cannot drift apart again.
+ */
+export const MARKING_WINDOW_DAYS = 30;
+
+/**
+ * Whether a register for this date can be marked at all, and if not, why —
+ * with the exact sentence the user should be shown.
+ *
+ * postRegister() is the authority and enforces this itself; the point of
+ * exporting it is that the Timetable and the register screen need to answer
+ * the same question *before* anyone fills a form in, and the only thing worse
+ * than a screen that blocks the wrong dates is two screens that disagree
+ * about which dates those are. Every caller reads this, so the rule has one
+ * definition.
+ */
+export function markingWindow(date, today = localDate()) {
+    if (date > today) {
+        return { markable: false, reason: 'future', age: null, message: 'Attendance cannot be marked for a future date.' };
+    }
+
+    const age = daysBetween(date, today);
+    if (age > MARKING_WINDOW_DAYS) {
+        return {
+            markable: false,
+            reason: 'tooOld',
+            age,
+            message: `That date is ${age} days ago. Attendance can only be marked or corrected within ${MARKING_WINDOW_DAYS} days.`
+        };
+    }
+
+    return { markable: true, reason: null, age, message: null };
+}
 
 /* ==========================================================================
    PREPARING A REGISTER
@@ -134,7 +176,14 @@ export async function postRegister({ batchId, date, entries }) {
 
     const batch = await batches$.findOrFail(batchId);
     if (!date) throw new Error('Choose the date being marked.');
-    if (date > localDate()) throw new Error('Attendance cannot be marked for a future date.');
+
+    // Both halves of the date rule come from markingWindow() so this and the
+    // screens that pre-empt it can never disagree — but they stay in their
+    // original positions, since which error a user sees first for a date that
+    // is both far too old *and* has no scheduled class is settled behaviour.
+    const dateRule = markingWindow(date);
+    if (dateRule.reason === 'future') throw new Error(dateRule.message);
+
     if (!Array.isArray(entries) || !entries.length) throw new Error('There is nobody in this batch to mark.');
 
     // Attendance belongs to a Timetable Session, not a raw date (Milestone
@@ -160,12 +209,9 @@ export async function postRegister({ batchId, date, entries }) {
         if (!valid.has(entry.status)) throw new Error(`"${entry.status}" is not a valid attendance status.`);
     }
 
-    // Backdating beyond a fortnight is almost always a mistyped date rather
-    // than a genuine correction, so it is refused rather than absorbed.
-    const age = daysBetween(date, localDate());
-    if (age > 30) {
-        throw new Error(`That date is ${age} days ago. Attendance can only be marked or corrected within 30 days.`);
-    }
+    // Backdating beyond the marking window is almost always a mistyped date
+    // rather than a genuine correction, so it is refused rather than absorbed.
+    if (dateRule.reason === 'tooOld') throw new Error(dateRule.message);
 
     // Milestone P2 (Parent/Student Portal): a guardian reads attendance by
     // querying guardianPhone/guardianEmail directly on the attendance
@@ -243,6 +289,141 @@ export async function monthlyGrid({ batchId, month = monthKey() }) {
                 rate: counted ? Math.round((present / counted) * 100) : null
             };
         })
+    };
+}
+
+/**
+ * Every day of one month for one batch, said plainly: was there a class, what
+ * happened to it, and can it still be marked.
+ *
+ * This exists because a bare `<input type="date">` cannot answer any of that
+ * — it offers all thirty-one days identically, so picking a Sunday for a
+ * Mon/Wed batch, or a date whose class was cancelled a fortnight ago, looked
+ * exactly like picking a real one. A calendar that shows which days actually
+ * held a class is the difference between choosing a date and guessing one.
+ *
+ * Sessions are authoritative where they exist (a replacement lands on a day
+ * the batch does not normally meet, and must show as a class day); recurrence
+ * answers for the rest, since a session is only materialised when its
+ * register is first posted.
+ */
+export async function batchCalendar({ batchId, month = monthKey() }) {
+    const [year, mon] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = endOfMonth(new Date(year, mon - 1, 1));
+
+    const [batch, sessions, marked] = await Promise.all([
+        batches$.findOrFail(batchId),
+        sessionMap(from, to),
+        markedSessions(from, to)
+    ]);
+
+    const days = [];
+    for (let d = new Date(year, mon - 1, 1); d.getMonth() === mon - 1; d.setDate(d.getDate() + 1)) {
+        const date = localDate(d);
+        const classSession = sessions.get(`${batchId}|${date}`);
+        const hasClass = Boolean(classSession) || isScheduledClassDay(batch, date);
+        const status = classSession?.status || (hasClass ? 'scheduled' : null);
+
+        days.push({
+            date,
+            dayOfMonth: d.getDate(),
+            weekday: d.getDay(),
+            hasClass,
+            status,
+            isReplacement: Boolean(classSession?.originalSessionId),
+            marked: marked.has(`${batchId}|${date}`),
+            markable: hasClass && status !== 'cancelled' && status !== 'postponed' && markingWindow(date).markable
+        });
+    }
+
+    return { batch, month, days };
+}
+
+/**
+ * One student's month: which days their batch met, whether they were there,
+ * and what that adds up to.
+ *
+ * The staff application had no per-student attendance view at all — the only
+ * one in the codebase is the guardian portal's, which queries by
+ * guardianPhone/guardianEmail and cannot be reused for a member of staff
+ * looking at a roll. Opening a student from a batch meant leaving for the
+ * Students module and losing the batch you were working through.
+ *
+ * Deliberately does *not* reuse batchCalendar(): that calls markedSessions(),
+ * which reads every attendance row for every student in the month to answer a
+ * question about one. This reads that one student's rows (an indexed
+ * single-field query) plus the month's sessions, and nothing else — the
+ * difference is roughly thirty documents against several hundred, on a drawer
+ * meant to be opened repeatedly while working down a roll.
+ */
+export async function studentMonth({ studentId, month = monthKey() }) {
+    const [year, mon] = month.split('-').map(Number);
+    const from = `${month}-01`;
+    const to = endOfMonth(new Date(year, mon - 1, 1));
+    const today = localDate();
+
+    const student = await students$.findOrFail(studentId);
+    const [rows, batch] = await Promise.all([
+        attendance$.forStudent(studentId, { from, to }),
+        student.batchId ? batches$.find(student.batchId) : null
+    ]);
+
+    // Only needed to know which days the class actually met; a student with
+    // no batch has no schedule to compare against, so it is skipped entirely
+    // rather than read and ignored.
+    const sessions = batch ? await sessionMap(from, to) : new Map();
+    const byDate = new Map(rows.map((r) => [r.date, r]));
+
+    const days = [];
+    for (let d = new Date(year, mon - 1, 1); d.getMonth() === mon - 1; d.setDate(d.getDate() + 1)) {
+        const date = localDate(d);
+        if (date > today) break;
+
+        const classSession = batch ? sessions.get(`${batch.id}|${date}`) : null;
+        const status = classSession?.status || null;
+
+        // A postponed original did not happen here and a cancelled one never
+        // happened at all — neither counts against the student, and showing
+        // them as unmarked absences would be a straightforward slander.
+        if (status === 'postponed' || status === 'cancelled') {
+            days.push({ date, dayOfMonth: d.getDate(), weekday: d.getDay(), held: false, status, mark: null });
+            continue;
+        }
+
+        const held = Boolean(classSession) || (batch ? isScheduledClassDay(batch, date) : false);
+        const record = byDate.get(date);
+        // A record can exist for a date the batch does not normally meet (a
+        // make-up class marked before its session was materialised), and that
+        // is real attendance — count it.
+        if (!held && !record) continue;
+
+        days.push({
+            date,
+            dayOfMonth: d.getDate(),
+            weekday: d.getDay(),
+            held: true,
+            status: status || 'scheduled',
+            isReplacement: Boolean(classSession?.originalSessionId),
+            mark: record?.status || null
+        });
+    }
+
+    const counted = days.filter((d) => d.mark);
+    const present = counted.filter((d) => d.mark === ATTENDANCE_STATUS.PRESENT).length;
+    const absent = counted.length - present;
+
+    return {
+        student,
+        batch,
+        month,
+        days,
+        present,
+        absent,
+        // Days the class met but nobody recorded this student either way.
+        unmarked: days.filter((d) => d.held && !d.mark).length,
+        held: days.filter((d) => d.held).length,
+        rate: counted.length ? Math.round((present / counted.length) * 100) : null
     };
 }
 
@@ -326,22 +507,72 @@ export async function markedSessions(from, to, branchId = null) {
     return new Set(rows.map((r) => `${r.batchId}|${r.date}`));
 }
 
-/** Registers that were never filled in — the follow-up list. */
-export async function missingRegisters({ days = 14, branchId = null } = {}) {
-    const from = addDays(localDate(), -days);
-    const [batches, done] = await Promise.all([
+/**
+ * Registers that were never filled in — the follow-up list.
+ *
+ * This used to answer the question from the batch's recurring weekly pattern
+ * alone (`batch.days`) and never looked at the Sessions collection, which
+ * made it wrong in both directions at once:
+ *
+ *   - A class that was **postponed or cancelled** still fell on a recurring
+ *     weekday and still had no attendance rows, so it was listed as missing.
+ *     Opening it and pressing Save then hit postRegister()'s own refusal —
+ *     "This class was postponed" — and the teacher was left arguing with a
+ *     list that had told them to do something the system forbids.
+ *   - A **replacement** class sits on a date the batch does *not* normally
+ *     meet, so the recurrence check skipped straight past it. A rescheduled
+ *     class that genuinely needed marking could never appear here at all,
+ *     which is the more expensive half of the same mistake: the register
+ *     nobody is reminded about is the one that stays unmarked.
+ *
+ * The Session record is authoritative wherever one exists; recurrence only
+ * answers for dates where no session has been materialised yet (sessions are
+ * created lazily, at the moment a register is first posted — see
+ * resolveSession()). This is the same resolution batches.service.js's
+ * timetable() already performs for the week grid, and the two now agree.
+ */
+export async function missingRegisters({ days = MARKING_WINDOW_DAYS, branchId = null } = {}) {
+    const today = localDate();
+    const from = addDays(today, -days);
+
+    const [batches, done, sessions] = await Promise.all([
         batches$.active(branchId),
-        markedSessions(from, localDate(), branchId)
+        markedSessions(from, today, branchId),
+        sessionMap(from, today, branchId)
     ]);
 
     const missing = [];
 
     for (const batch of batches) {
-        for (let d = new Date(`${from}T00:00:00`); localDate(d) <= localDate(); d.setDate(d.getDate() + 1)) {
+        for (let d = new Date(`${from}T00:00:00`); localDate(d) <= today; d.setDate(d.getDate() + 1)) {
             const date = localDate(d);
-            if (!isScheduledClassDay(batch, date)) continue;
+            const classSession = sessions.get(`${batch.id}|${date}`);
+
+            if (classSession) {
+                // Neither of these is an outstanding register: the postponed
+                // one handed its obligation to the replacement (which this
+                // same loop finds on its own date), and the cancelled one
+                // never happened and never can be marked.
+                if (classSession.status === 'postponed') continue;
+                if (classSession.status === 'cancelled') continue;
+            } else if (!isScheduledClassDay(batch, date)) {
+                // No session recorded and not a normal meeting day — nothing
+                // was ever due here.
+                continue;
+            }
+
             if (done.has(`${batch.id}|${date}`)) continue;
-            missing.push({ batch, date, age: daysBetween(date, localDate()) });
+
+            missing.push({
+                batch,
+                date,
+                age: daysBetween(date, today),
+                // True for a class that was moved to this date. Worth saying
+                // out loud in the list: it explains why a batch is showing up
+                // on a day it doesn't normally meet.
+                isReplacement: Boolean(classSession?.originalSessionId),
+                sessionStatus: classSession?.status || 'scheduled'
+            });
         }
     }
 

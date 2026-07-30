@@ -275,7 +275,7 @@ export class Shell {
 
     bind() {
         on(this.root, 'click', '[data-action="search"]', () => openPalette());
-        on(this.root, 'click', '[data-action="profile"]', () => router.go('/settings?tab=users'));
+        on(this.root, 'click', '[data-action="profile"]', () => router.go('/profile'));
 
         on(this.root, 'click', '[data-action="collapse"]', () => {
             this.collapsed = !this.collapsed;

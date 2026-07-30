@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.23.1',
+    version: '2.24.0',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',
@@ -737,7 +737,18 @@ export const NAVIGATION = Object.freeze([
             { path: '/notifications', label: 'Notifications', icon: 'bell', cap: CAPABILITIES.STUDENT_VIEW,
               load: () => import('../modules/notifications/notifications.page.js') },
             { path: '/settings', label: 'Settings', icon: 'settings', cap: CAPABILITIES.SETTINGS_VIEW,
-              load: () => import('../modules/settings/settings.page.js') }
+              load: () => import('../modules/settings/settings.page.js') },
+            // Everyone's own account, reached from the profile button in the
+            // header rather than the sidebar — hence `hidden`. `cap: null` is
+            // deliberate and is the whole point: the header button is shown to
+            // every signed-in person, so its destination must be one every
+            // role can actually enter. It used to point at Settings → Users,
+            // which needs settings.view, so a Teacher & Reception clicking
+            // their own name landed on the route-denied screen. The page only
+            // ever reads the caller's own record (see its header comment), so
+            // there is nothing here a capability would be protecting.
+            { path: '/profile', label: 'My account', icon: 'user', cap: null,
+              hidden: true, load: () => import('../modules/auth/profile.page.js') }
         ]
     }
 ]);

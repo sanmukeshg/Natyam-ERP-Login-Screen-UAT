@@ -257,6 +257,45 @@ class FirestoreUserRepository {
         return { id, ...record };
     }
 
+    /**
+     * Writes accounts from a backup file. Restore-only.
+     *
+     * Deliberately *not* named `replaceAll()`, and deliberately not shaped
+     * like the delete-all-then-write method every other repository has. An
+     * account is not a record of something the school did — it is somebody's
+     * access. Clearing the collection first would delete every account the
+     * backup happens not to mention, including accounts created since it was
+     * taken, and there is no server-side way to undo that.
+     *
+     * `skipIds` exists for one specific account: the administrator running
+     * the restore. Overwriting their own document mid-operation can change
+     * their role, deactivate them, or soft-delete them outright — and the
+     * router re-checks the live user record on every navigation, so the
+     * effect is immediate lockout part-way through their own restore.
+     *
+     * @param {Array<object>} rows      Account records from a backup's `users` section.
+     * @param {object}  [options]
+     * @param {string[]} [options.skipIds=[]]  Document ids left exactly as they are.
+     */
+    async restoreAll(rows, { skipIds = [] } = {}) {
+        const skip = new Set(skipIds.map(emailId).filter(Boolean));
+        let written = 0;
+        let skipped = 0;
+
+        for (const row of rows || []) {
+            const id = emailId(row.id || row.email);
+            if (!id) continue;
+            if (skip.has(id)) { skipped += 1; continue; }
+
+            const record = { ...row };
+            delete record.id;
+            await setDoc(doc(firestore, COLLECTION_NAME, id), record);
+            written += 1;
+        }
+
+        return { written, skipped };
+    }
+
     /** `USR000001`-style code, via the centralized sequence generator (see sequenceGenerator.firestore.js). */
     async nextUserCode() {
         return nextCode('userCode', 'USR');

@@ -72,6 +72,105 @@
     background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-inverse);
 }
 
+/* --------------------------------------------------------------------------
+   Compact stat row — three figures side by side, at any width.
+
+   Used where a drawer needs headline numbers but has no room for KPI cards:
+   `.grid-3` collapses to a single column on a phone, which turns three small
+   numbers into three full-width blocks and pushes the actual content off
+   screen. These stay three-across because the values are short by
+   construction (a percentage and two counts).
+   -------------------------------------------------------------------------- */
+.stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-3);
+    text-align: center;
+}
+
+.stat-value {
+    display: block;
+    font-size: var(--text-2xl);
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--text-primary);
+}
+
+.stat-label {
+    display: block;
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Class-date picker (Attendance register)
+
+   A month grid answering the one question a native <input type="date"> cannot:
+   which of these days did this batch actually meet, and what happened to each?
+   The native input stays alongside it — on a phone its OS picker is the better
+   control, and the register is used one-handed at the edge of a hall.
+   -------------------------------------------------------------------------- */
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: var(--space-1);
+}
+
+.calendar-heading {
+    text-align: center;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    padding-bottom: var(--space-1);
+}
+
+.calendar-day {
+    position: relative;
+    aspect-ratio: 1;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    background: transparent;
+    color: var(--text-muted);
+}
+
+/* A day with no class is a plain label, never a target. */
+span.calendar-day { cursor: default; }
+button.calendar-day { cursor: pointer; }
+button.calendar-day:hover { border-color: var(--border-strong); }
+
+.calendar-day[data-state="marked"]    { background: var(--success-100); color: var(--success-700); font-weight: 600; }
+.calendar-day[data-state="pending"]   { background: var(--warning-100); color: var(--warning-700); font-weight: 600; }
+.calendar-day[data-state="cancelled"] { background: var(--danger-100);  color: var(--danger-700); text-decoration: line-through; }
+.calendar-day[data-state="postponed"] { background: var(--surface-sunken); color: var(--text-muted); text-decoration: line-through; }
+.calendar-day[data-state="locked"]    { background: var(--surface-sunken); color: var(--text-muted); }
+.calendar-day[data-state="none"]      { color: var(--text-disabled); }
+
+/* Marks a replacement — a class moved onto a day the batch does not normally meet. */
+.calendar-dot {
+    position: absolute;
+    bottom: 3px; left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px;
+    border-radius: var(--radius-full);
+    background: currentColor;
+}
+
+.calendar-key {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: var(--radius-xs);
+    margin-right: var(--space-1);
+    vertical-align: middle;
+}
+.calendar-key[data-state="marked"]    { background: var(--success-100); }
+.calendar-key[data-state="pending"]   { background: var(--warning-100); }
+.calendar-key[data-state="cancelled"] { background: var(--danger-100); }
+/* Both of these are near-invisible against a dark surface without an outline —
+   the sunken/transparent fills that read clearly in light mode disappear. */
+.calendar-key[data-state="postponed"] { background: var(--surface-sunken); border: 1px solid var(--border); }
+.calendar-key[data-state="none"]      { background: transparent; border: 1px solid var(--border); }
+
 /* The compact dot used in the month grid, where forty rows must fit a screen. */
 .mark-dot {
     display: inline-block;

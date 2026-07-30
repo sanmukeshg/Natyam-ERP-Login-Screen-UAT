@@ -221,7 +221,9 @@ export async function searchFlat(query, { limit = 12 } = {}) {
 const COMMANDS = [
     { id: 'new-admission',  label: 'New application',        hint: 'Start the admissions wizard', icon: 'plus',        capability: 'admission.edit',   route: '#/admissions/new' },
     { id: 'new-student',    label: 'Add student directly',   hint: 'Skip the application',        icon: 'user-plus',   capability: 'student.edit',     route: '#/students/new' },
-    { id: 'mark-attendance',label: 'Mark attendance',        hint: 'Today’s registers',           icon: 'check-square',capability: 'attendance.mark',  route: '#/attendance' },
+    // Lands on the Timetable, where a register is opened from its own class
+    // tile — not the Attendance day board, which is a fallback screen now.
+    { id: 'mark-attendance',label: 'Mark attendance',        hint: 'Open the week’s classes',     icon: 'check-square',capability: 'attendance.mark',  route: '#/timetable' },
     { id: 'collect-fee',    label: 'Record a payment',       hint: 'Issue a receipt',             icon: 'receipt',     capability: 'fee.collect',      route: '#/fees?action=collect' },
     { id: 'add-expense',    label: 'Record an expense',      hint: 'Post to the ledger',          icon: 'trending-down',capability: 'finance.edit',    route: '#/finance?action=expense' },
     { id: 'run-payroll',    label: 'Prepare payroll',        hint: 'This month’s salaries',       icon: 'briefcase',   capability: 'finance.edit',     route: '#/finance?tab=payroll' },

@@ -19,7 +19,9 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatNumber } from '../../utils/money.js';
+import { startOfWeek, addDays, formatDate } from '../../utils/date.js';
 import { timetable } from '../../services/batches.service.js';
+import { markingWindow } from '../../services/attendance.service.js';
 import { listStaff } from '../../services/staff.service.js';
 
 const STATUS_LABEL = { cancelled: 'Cancelled' };
@@ -29,6 +31,9 @@ export default class TimetablePage extends Page {
         super(context);
         this.title = 'Timetable';
         this.teacherId = this.query.teacher || '';
+        // Monday of the week on show. Navigation moves this a whole week at
+        // a time, so it stays Monday-anchored the way the service expects.
+        this.weekStart = this.query.week || startOfWeek();
     }
 
     async render(container) {
@@ -36,6 +41,11 @@ export default class TimetablePage extends Page {
         render(container, this.shell());
         this.bind();
         await this.load();
+    }
+
+    /** "27 Jul – 2 Aug 2026" — the week on show, stated rather than implied. */
+    weekRangeLabel() {
+        return `${formatDate(this.weekStart, { withYear: false })} – ${formatDate(addDays(this.weekStart, 6))}`;
     }
 
     shell() {
@@ -46,6 +56,20 @@ export default class TimetablePage extends Page {
                     <p class="page-subtitle" data-role="subtitle">The teaching week.</p>
                 </div>
                 <div class="page-actions">
+                    <div class="row row-tight">
+                        <button class="btn btn-secondary btn-icon btn-sm" data-week="-1"
+                                aria-label="Previous week">${raw(icon('chevron-left', { size: 15 }))}</button>
+                        <!-- Rendered here, not only in paint(): the week being shown is
+                             known the moment the page is constructed, and leaving this
+                             to the data load meant two unlabelled arrows during every
+                             load — and permanently, if the load threw, since paint()
+                             never runs in that case. -->
+                        <span class="type-caption" data-role="week-range">${this.weekRangeLabel()}</span>
+                        <button class="btn btn-secondary btn-icon btn-sm" data-week="1"
+                                aria-label="Next week">${raw(icon('chevron-right', { size: 15 }))}</button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" data-action="this-week"
+                            ${this.weekStart === startOfWeek() ? 'hidden' : ''}>This week</button>
                     <label class="filter-control">
                         <span class="sr-only">Teacher</span>
                         <select class="select select-sm" data-role="teacher">
@@ -70,6 +94,16 @@ export default class TimetablePage extends Page {
         this.onDispose(on(this.container, 'click', '[data-batch]', (_e, target) =>
             router.go(`/attendance?batch=${target.dataset.batch}&date=${target.dataset.date}`)));
 
+        // Whole weeks at a time, so weekStart stays Monday-anchored.
+        this.onDispose(on(this.container, 'click', '[data-week]', (_e, target) => {
+            this.weekStart = addDays(this.weekStart, Number(target.dataset.week) * 7);
+            this.load();
+        }));
+        this.onDispose(on(this.container, 'click', '[data-action="this-week"]', () => {
+            this.weekStart = startOfWeek();
+            this.load();
+        }));
+
         this.events.on(EVENTS.BRANCH_CHANGED, () => this.load());
     }
 
@@ -79,7 +113,7 @@ export default class TimetablePage extends Page {
 
         try {
             const [week, staff] = await Promise.all([
-                timetable(session.branch()),
+                timetable(session.branch(), this.weekStart),
                 listStaff(session.branch())
             ]);
 
@@ -113,8 +147,19 @@ export default class TimetablePage extends Page {
         const total = week.reduce((sum, day) => sum + day.sessions.length, 0);
         const clashes = findClashes(week);
 
+        const isCurrentWeek = this.weekStart === startOfWeek();
+
+        // The week on show was never stated anywhere — "15 classes a week"
+        // reads identically whichever week you are looking at, which was
+        // fine only while the page could show exactly one.
+        render(this.container.querySelector('[data-role="week-range"]'), this.weekRangeLabel());
+
+        const thisWeekBtn = this.container.querySelector('[data-action="this-week"]');
+        if (thisWeekBtn) thisWeekBtn.hidden = isCurrentWeek;
+
         render(this.container.querySelector('[data-role="subtitle"]'), html`
-            ${formatNumber(total)} class${total === 1 ? '' : 'es'} a week
+            ${isCurrentWeek ? 'This week' : 'Week of ' + formatDate(this.weekStart)} ·
+            ${formatNumber(total)} class${total === 1 ? '' : 'es'}
             ${clashes.length ? `· ${clashes.length} clash${clashes.length === 1 ? '' : 'es'}` : '· no clashes'}
         `);
 
@@ -141,6 +186,13 @@ export default class TimetablePage extends Page {
                                         const tone = cancelled ? 'negative'
                                             : entry.registerMarked ? 'positive'
                                             : pending ? 'caution' : '';
+                                        // Free navigation means tiles for weeks nobody can mark
+                                        // are now reachable. Say so on the tile rather than
+                                        // letting someone open a register and find out at Save.
+                                        // The rule comes from attendance.service.js so this can
+                                        // never disagree with what postRegister() will allow.
+                                        const mark = markingWindow(entry.date);
+                                        const unmarkable = !cancelled && !entry.registerMarked && !mark.markable;
                                         return html`
                                         <li>
                                             <div class="timetable-slot" data-tone="${tone}">
@@ -157,6 +209,11 @@ export default class TimetablePage extends Page {
                                                         <span class="badge badge-danger">${STATUS_LABEL.cancelled}</span>
                                                     ` : pending ? html`
                                                         <span class="badge badge-warning">Rescheduled</span>
+                                                    ` : ''}
+                                                    ${unmarkable ? html`
+                                                        <span class="type-caption type-muted">
+                                                            ${mark.reason === 'future' ? 'Not yet — future class' : 'Too old to mark'}
+                                                        </span>
                                                     ` : ''}
                                                 </button>
                                             </div>

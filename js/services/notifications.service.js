@@ -250,7 +250,7 @@ async function unmarkedRegisters(branchId) {
         kind: 'attendance',
         title: `${missing.length} register${missing.length === 1 ? '' : 's'} not marked this week`,
         body: `The oldest is ${oldest.batch.name} on ${formatDate(oldest.date)}.`,
-        link: '#/attendance'
+        link: '#/timetable'
     })];
 }
 

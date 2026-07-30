@@ -135,7 +135,9 @@ export async function headline(branchId = null) {
             unit: rate === null ? null : '%',
             delta: deltaOf(rate, priorRate, 'vs previous 30 days', true),
             tone: rate === null ? 'neutral' : rate >= 80 ? 'positive' : rate >= 65 ? 'caution' : 'negative',
-            link: '#/attendance'
+            // The Timetable is the way into attendance; the day board behind
+            // `#/attendance` is a fallback, not somewhere to send people.
+            link: '#/timetable'
         },
         {
             key: 'applications',
@@ -373,7 +375,7 @@ export async function needsAttention(branchId = null) {
             title: `${missing.length} register${missing.length === 1 ? '' : 's'} not marked this week`,
             detail: missing.slice(0, 2).map((m) => `${m.batch.name} on ${m.date}`).join(', '),
             action: 'Mark attendance',
-            link: '#/attendance'
+            link: '#/timetable'
         });
     }
     if (stalledApps.filter((a) => daysBetween(a.appliedOn, localDate()) > 7).length) {

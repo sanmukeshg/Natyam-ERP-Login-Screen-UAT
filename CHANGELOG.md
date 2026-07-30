@@ -9,6 +9,130 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.24.0] — 2026-07-30 — Erase, Attendance session-awareness, self-service profile
+
+Five phases from a UAT observation document ("New Requirements and Observation
+2.23.1"), reviewed, approved, and implemented in the agreed priority order:
+critical data integrity first, then Attendance/Timetable's session model, then
+batch-level attendance reporting, then permissions and self-service, then a
+responsive/dark-mode pass over everything new. No `firestore.rules` change —
+every fix is application-layer.
+
+### Fixed — critical
+- **"Erase everything" erased almost nothing.** `resetEverything()` iterated
+  `STORE_NAMES` calling the IndexedDB-only `db.clear()` — a loop that was
+  correct before Milestone 3 and had quietly done nothing to real data since
+  every entity moved to Firestore. It cleared 24 already-empty local stores,
+  reported success, and left all 23 Firestore collections untouched. Rewritten
+  to clear each collection through its own repository's `replaceAll([])`;
+  returns `{cleared, failed, preserved, ok}` instead of a bare `true`, so a
+  partial failure is reported rather than hidden. Sign-in accounts (`users`)
+  are deliberately preserved — the confirmation dialog now says so.
+- **`resetFlow()` had no error handling.** A thrown error during erase produced
+  no message at all. Now wrapped, with distinct hard-failure, partial-failure
+  and success outcomes shown to the user.
+- **Backups did not include sign-in accounts.** `users` was the one collection
+  in `SCHEMA.stores` with no Firestore override in `buildBackup()` — every
+  backup carried an empty or stale `users` section. Now included on every
+  backup; restoring accounts is a separate, opt-in confirmation during
+  restore, and never overwrites the administrator performing the restore
+  (`users$.restoreAll()`, new).
+- **The restore confirmation dialog always said "holds 0 records."**
+  `inspectBackup()`'s result never had an `inspection.recordCount` or
+  `inspection.summary` field — both read from `summarise()`'s actual
+  `totalRecords`/`counts` now.
+
+### Fixed — Attendance & Timetable
+- **Missing registers listed postponed/cancelled classes and never listed
+  replacements.** `missingRegisters()` read only a batch's recurring weekday
+  pattern and attendance rows, never the `classSessions` collection — so a
+  postponed class stayed on the list (and refused to save when marked), while
+  a replacement class sitting on a non-recurring day could never appear at
+  all. Now session-aware, mirroring `timetable()`'s existing resolution;
+  replacement entries are tagged and dated.
+- **Three different attendance time windows.** The page asked for 7 days, the
+  service defaulted to 14, `postRegister()` allowed marking within 30 — a
+  20-day-old register was markable but never listed as missing. Unified on
+  `MARKING_WINDOW_DAYS` and a shared `markingWindow(date)` predicate that
+  `postRegister()`, the Timetable and the register screen all read, so none
+  of them can disagree about which dates are valid.
+- **Timetable showed only the current week, with no date range stated.**
+  `timetable(branchId, weekStartDate)` now accepts a week to show; prev/next
+  controls, a stated date range, and a "This week" return button. Tiles
+  outside the 30-day markable window are labelled rather than silently
+  failing at Save.
+- **The register opened silently on dates a batch does not meet.**
+  `openRegister()` has always returned `scheduled`/`sessionStatus`; the page
+  never read either. A warning banner now explains cancelled, postponed,
+  future, too-old, and non-recurring dates — informational only, since a
+  genuine make-up class on an unusual day is meant to remain markable. A new
+  "Class dates" month-grid picker (`batchCalendar()`) shows which days a
+  batch actually held class, color-coded by outcome.
+
+### Added — batch & student attendance
+- **Per-student monthly attendance, opened from a batch's roll.** Clicking a
+  student on the batch roll used to navigate away to the Students module,
+  losing the batch context; it now opens a drawer in place
+  (`studentMonth()`), showing the current month's attendance rate,
+  present/absent counts, and a day-by-day list, with month navigation. Read
+  only — it never routes to the register-marking screen. Cancelled/postponed
+  classes are excluded from the percentage rather than counted as absences.
+- **The Attendance day board is now an internal fallback, not a destination.**
+  Every dashboard shortcut, notification, command-search entry, and the
+  Settings landing-screen option that used to open it directly now open the
+  Timetable instead, from which a register is reached via its own tile. The
+  route still resolves for anyone who reaches it directly.
+- Postponing or cancelling a class from the register, and switching branch
+  mid-register, now return to the Timetable (or wherever the user came from)
+  instead of silently discarding the screen state onto the day board.
+
+### Added — profile, settings & permissions
+- **New `/profile` ("My account") route, reachable by every signed-in role.**
+  The header's profile button used to send everyone to Settings → Users,
+  which needs `settings.view` — a capability Teacher & Reception does not
+  hold, so clicking their own name produced a route-denied screen, and they
+  had no way to change their own password anywhere in the app. The new page
+  shows the caller's own record (read by id from the session, never queried)
+  and offers self-service password change via the existing `setOwnPassword()`.
+- **Settings tabs are now capability-filtered.** Holding `settings.view` used
+  to show all nine tabs regardless of what a role could actually open — a
+  Viewer saw Users, Audit log and Data, and opening Audit log threw
+  immediately. Each tab now declares what it needs; a stale `?tab=` falls
+  back to the first tab the caller can open instead of rendering blank.
+- **The read-only Roles matrix now explains itself.** Per a deliberate,
+  reviewed decision *not* to make it editable this release: the screen states
+  plainly that `firestore.rules` derives access from a role's name rather
+  than a capability list, so editing this table alone would produce buttons
+  the database still refuses — and points to Settings → Users, where role
+  *assignment* is genuinely editable. Recorded as a future dedicated
+  milestone in `docs/architecture/IAM_ROLE_MODEL.md` §6, including why it
+  needs a `firestore.rules` rewrite and a rules test harness first, not a UI
+  change alone.
+
+### Fixed — presentation
+- The Timetable's week-range label was blank until data finished loading (and
+  stayed blank on a load failure); now set from page state immediately.
+- The per-student attendance drawer used three stacked KPI cards that pushed
+  the day-by-day list nearly 350px down a phone screen; replaced with a
+  compact three-across stat row.
+- A register warning banner interpolated a batch name into its title;
+  `.alert` does not shrink its title column, so a long name squeezed the
+  explanation into an overflowing one-word-per-line column. Titles are now
+  short and fixed; specifics moved into the body text.
+- The profile page's "How you sign in" card header wrapped to three lines on
+  a phone; shortened and restructured.
+
+### Known, not fixed this release
+- Three call sites pass a full ISO timestamp to `formatDate()`, which parses
+  by splitting on `-` and silently renders the 1st of the month for anything
+  but a bare `YYYY-MM-DD` (`students.page.js`'s student timeline,
+  `admissions.page.js`'s draft "saved at", the guardian portal's fee
+  timeline). Found while building the new profile page; the same call there
+  was fixed. The other three are pre-existing and outside this round's
+  approved scope.
+
+---
+
 ## [2.23.1] — 2026-07-30 — Remove IndexedDB-era claims from the UI
 
 The Settings → Data tab and the shell footer still described the pre-Firestore architecture, where the school's entire record set lived in one browser profile. Every collection has been on Firestore since v2.15.0 (and `settings` since v2.23.0), so this copy had been telling the user something untrue for some time. Raised from a UAT observation document.

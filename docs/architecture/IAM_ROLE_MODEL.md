@@ -233,3 +233,48 @@ No migration, ever, for a change of this kind. A user document stores a role
 *key* (`owner_accountant`), never a capability list — capabilities are resolved
 at sign-in by `session.hydrate()` calling `roleCapabilities()`. The existing
 Owner account receives the upgraded grant the next time she signs in.
+
+---
+
+## 6. Future: an editable role matrix
+
+Deferred deliberately, 2026-07-30, after review. Settings → Roles stays
+read-only until this is done properly, and the screen now says so in as many
+words rather than leaving an Administrator to discover it by clicking.
+
+**Why it is not simply a UI feature.** The client half already exists and is
+already wired: `configureRoles()` installs a database-sourced matrix,
+`roleTable()`/`roleCapabilities()` resolve through it, `roles.override` is the
+reserved settings key, and `applyStructuralOverrides()` loads it at boot
+(`js/app.js`). Writing an editor would make the matrix editable *in the
+browser* tomorrow.
+
+The blocker is `firestore.rules`. It derives permission from the role's
+**name**, hardcoded across roughly twenty helper functions —
+`myRole() == 'administrator'`, `canManageStudents() { canAdminister() ||
+isTeacherReception() }` — and has no representation of a capability anywhere.
+Granting `student.edit` to Viewer through a client-side editor would light up
+every edit button for that role and then fail every write with *"Missing or
+insufficient permissions."* An interface that lies about authority is worse
+than one that admits its limits.
+
+**What doing it properly requires, together, in one change:**
+
+1. Resolve each user's capability array at write time and store it on their
+   `users` document, so a rule can read it without a second lookup.
+2. Rewrite `firestore.rules` to test capabilities (`myCaps().hasAny([...])`)
+   instead of role names — all ~20 helpers and every block that calls them.
+3. A backfill re-stamping capabilities onto every existing account, and a
+   re-stamp triggered whenever the matrix is edited afterward.
+4. **A rules test harness first.** These rules are hand-written and have never
+   been under automated test (ADR-014 discloses this as a known risk). A
+   mistake in a rewrite this size locks every user out of the database with no
+   client-side appeal. The harness is not optional scope; it is the thing that
+   makes the rest safe to attempt.
+
+**Meanwhile** the model is not rigid in the way that matters day to day: role
+*assignment* is fully editable per user in Settings → Users, and adding a
+capability to the Owner's grant is a one-line change to `CAPABILITIES` (§5).
+What is fixed is the set of four role names and the capability list attached to
+each — and the Owner upgrade already moved those to where the academy needs
+them for normal operation.

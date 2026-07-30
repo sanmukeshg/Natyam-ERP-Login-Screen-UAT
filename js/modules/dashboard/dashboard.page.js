@@ -255,7 +255,10 @@ export default class DashboardPage extends Page {
                         </p>
                     </div>
                     <div class="card-actions">
-                        <a class="btn btn-sm btn-ghost" href="#/attendance">Open</a>
+                        <!-- Timetable, not the Attendance day board: registers are
+                             taken from a timetable tile, and the day board is a
+                             fallback rather than a destination. -->
+                        <a class="btn btn-sm btn-ghost" href="#/timetable">Open</a>
                     </div>
                 </div>
                 <div class="card-body card-body-tight">

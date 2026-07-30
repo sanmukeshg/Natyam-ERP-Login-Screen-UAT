@@ -292,20 +292,26 @@ export async function batchDetail(id) {
  * read: looking at the timetable never creates a session (sessionMap() is
  * read-only) — only opening/marking a register, or an explicit postpone/
  * cancel action, does that.
+ *
+ * @param {string|null} branchId
+ * @param {string|null} [weekStartDate]  Monday of the week to show, as
+ *   YYYY-MM-DD. Defaults to the current week. The page passes this to move
+ *   backwards and forwards; any date works, but it is expected to already be
+ *   a Monday (the page derives it with startOfWeek() + whole-week offsets).
  */
-export async function timetable(branchId = null) {
+export async function timetable(branchId = null, weekStartDate = null) {
     const [batches, teachers] = await Promise.all([batches$.active(branchId), staff$.teachers()]);
     const teacherName = new Map(teachers.map((t) => [t.id, t.name]));
     const byId = new Map(batches.map((b) => [b.id, b]));
 
-    // Each day column stands for a real calendar date within *this* week
-    // (Monday-anchored, matching the Indian school week) — used below to look
-    // up whether the register for that date has been taken. Anchoring to the
-    // current week, rather than the next upcoming occurrence of each weekday,
-    // matters: a day earlier in the week than today must show its own
-    // already-passed date, not next week's, or attendance (which can never be
-    // marked for a future date) could never match it.
-    const weekStart = startOfWeek();
+    // Each day column stands for a real calendar date within the week being
+    // shown (Monday-anchored, matching the Indian school week) — used below
+    // to look up whether the register for that date has been taken.
+    // Anchoring to a real week, rather than the next upcoming occurrence of
+    // each weekday, matters: a day earlier in the week than today must show
+    // its own already-passed date, not next week's, or attendance (which can
+    // never be marked for a future date) could never match it.
+    const weekStart = weekStartDate || startOfWeek();
     const days = WEEK.map((day, i) => ({ day, date: addDays(weekStart, i) }));
     const weekEnd = days[days.length - 1].date;
     const [markedSet, sessions] = await Promise.all([

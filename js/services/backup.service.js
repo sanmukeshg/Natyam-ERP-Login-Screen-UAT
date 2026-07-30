@@ -23,7 +23,7 @@ import {
     feePlans$, invoices$, payments$, ledger$, expenses$, salaries$,
     documents$, drafts$, notifications$,
     branches$, academicYears$, curricula$, curriculumLevels$, holidays$,
-    audit$
+    audit$, users$
 } from '../data/repositories.js';
 
 const FILE_KIND = 'natyam-erp-backup';
@@ -54,8 +54,35 @@ const FIRESTORE_STORE_REPOS = {
     documents: documents$, admissionDrafts: drafts$, notifications: notifications$,
     branches: branches$, academicYears: academicYears$, curricula: curricula$,
     curriculumLevels: curriculumLevels$, holidays: holidays$,
-    auditLog: audit$, settings: settings$
+    auditLog: audit$, settings: settings$, users: users$
 };
+
+/**
+ * Every Firestore collection the school's records live in — the map above
+ * plus the Firestore-only sections, which have no IndexedDB store name to be
+ * keyed by and so are absent from it (see FIRESTORE_ONLY_SECTIONS).
+ *
+ * resetEverything() erases by *exclusion* from this list rather than by an
+ * allow-list of things to wipe, and the distinction is the whole reason the
+ * erase was broken: it used to iterate STORE_NAMES — an allow-list that went
+ * stale the moment a collection moved to Firestore, so an erase cleared
+ * twenty-four empty local stores, reported success, and left every record
+ * where it was. A collection added here in future is erased automatically;
+ * one that must survive has to be named in PRESERVED_ON_ERASE below, where
+ * the decision is visible.
+ */
+const ERASABLE_REPOS = { ...FIRESTORE_STORE_REPOS, classSessions: classSessions$ };
+
+/**
+ * What "erase every record" deliberately does not touch.
+ *
+ * Sign-in accounts are not the school's records — they are how anyone reaches
+ * the school's records at all. Wiping `users` would delete the administrator
+ * performing the erase along with everyone else, leaving an installation
+ * nobody can sign into and no server-side path to recover it. The Settings
+ * dialog says so plainly rather than leaving the exception implicit.
+ */
+const PRESERVED_ON_ERASE = Object.freeze(['users']);
 
 /* ==========================================================================
    EXPORT
@@ -116,6 +143,16 @@ export async function buildBackup({ note = null } = {}) {
     // The last IndexedDB holdout (settings$'s own header comment explains
     // why it matters) — same override pattern as every entity above.
     data.settings = await settings$.all();
+    // Sign-in accounts. `users` was the one store in SCHEMA.stores with no
+    // override here, so db.exportAll() supplied it from IndexedDB — where
+    // accounts stopped living when users$ became the first repository to
+    // move to Firestore. Every backup taken before this carried an empty or
+    // stale users section, which meant a backup restored onto a fresh
+    // project produced a database full of records and no account able to
+    // read them. Restoring accounts is a separate, opt-in decision
+    // (restore()'s `restoreUsers` option) — but a backup that cannot even
+    // describe who had access is not a backup of the installation.
+    data.users = await users$.all({ includeDeleted: true });
 
     const counts = Object.fromEntries(Object.entries(data).map(([store, rows]) => [store, rows.length]));
 
@@ -219,10 +256,19 @@ export async function inspectBackup(file) {
  * safety copy of the current state, taken and offered for download before
  * anything is overwritten.
  *
+ * Sign-in accounts are the one section that is *not* restored by default.
+ * Records describe what the school did and should come back exactly as the
+ * backup has them; accounts describe who may sign in right now, and a backup
+ * from three months ago is usually the wrong answer to that question — it
+ * reinstates people who have since left and removes nobody, since accounts
+ * are never deleted by a restore. Opt in with `restoreUsers` when the intent
+ * really is to rebuild an installation, not to roll records back.
+ *
  * @param {object} backup            A backup object from inspectBackup.
- * @param {boolean} [options.safetyCopy=true]  Download current data first.
+ * @param {boolean} [options.safetyCopy=true]   Download current data first.
+ * @param {boolean} [options.restoreUsers=false] Also write back sign-in accounts.
  */
-export async function restore(backup, { safetyCopy = true } = {}) {
+export async function restore(backup, { safetyCopy = true, restoreUsers = false } = {}) {
     session.require(CAPABILITIES.DATA_RESTORE, 'restore from a backup');
 
     if (backup.kind !== FILE_KIND) throw new Error('That is not a NATYAM ERP backup file.');
@@ -269,7 +315,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         documents: documentRows, admissionDrafts: draftRows, notifications: notificationRows,
         branches: branchRows, academicYears: academicYearRows, curricula: curriculumRows,
         curriculumLevels: curriculumLevelRows, holidays: holidayRows,
-        auditLog: auditLogRows, settings: settingsRows,
+        auditLog: auditLogRows, settings: settingsRows, users: userRows,
         ...indexedDbStores
     } = known;
 
@@ -308,6 +354,15 @@ export async function restore(backup, { safetyCopy = true } = {}) {
     // stamping it would silently discard the stamp.
     if (settingsRows) await settings$.replaceAll(settingsRows);
 
+    // Accounts, only when explicitly asked for. Destructured out of `known`
+    // either way, so a backup's users section is never written into the
+    // orphaned IndexedDB `users` store by the generic importAll() above —
+    // which is where it silently went before accounts were backed up at all.
+    let usersRestored = null;
+    if (restoreUsers && userRows) {
+        usersRestored = await users$.restoreAll(userRows, { skipIds: [session.actorId()] });
+    }
+
     await settings$.set('lastRestoreAt', nowISO());
 
     // A restore can bring in a different set of branches. The previously
@@ -326,7 +381,7 @@ export async function restore(backup, { safetyCopy = true } = {}) {
         }
     } catch { /* private mode or storage disabled — nothing to clear */ }
 
-    const result = { ...summarise(backup), safety };
+    const result = { ...summarise(backup), safety, usersRestored };
     bus.emit(EVENTS.BACKUP_RESTORED, result);
     bus.emit(EVENTS.DATA_IMPORTED, result);
 
@@ -363,15 +418,30 @@ export async function exportStore(storeName, { pretty = true } = {}) {
 }
 
 /**
- * Wipes everything and leaves a genuinely empty installation.
+ * Wipes the school's records and leaves a genuinely empty installation.
  *
- * The previous behaviour cleared every store and then, on the next boot,
- * `seedIfEmpty` saw an empty database and rebuilt the entire demonstration
- * dataset — so an erase appeared to succeed and the sample students, staff and
- * batches were back a second later. The clear now records that the database
- * was emptied deliberately, and the seeder honours that mark. Browser storage
- * is cleared too, or the previously selected branch and preferences would
- * outlive the data they refer to.
+ * This used to clear every IndexedDB store and stop there, which was correct
+ * exactly once — before Milestone 3. Every entity has since moved to Cloud
+ * Firestore, so the loop was clearing twenty-four stores that had held
+ * nothing for months, succeeding at all of it, and returning `true` while the
+ * school's entire record sat untouched in Firestore. An erase reported
+ * success and erased nothing. Collections are now cleared where they
+ * actually live (ERASABLE_REPOS above).
+ *
+ * Sign-in accounts survive deliberately — see PRESERVED_ON_ERASE.
+ *
+ * There is no cross-collection transaction available at this scale, so a
+ * failure part-way through leaves the installation half-erased and there is
+ * no honest way to pretend otherwise. Rather than throw on the first failure
+ * and leave the caller guessing how far it got, every collection is
+ * attempted and the outcome of each is reported back, so Settings can say
+ * exactly what happened instead of showing an unconditional success message.
+ *
+ * `seedIfEmpty` is still honoured via the local `installation` marker, or the
+ * next boot would see an empty database and rebuild the demonstration
+ * dataset a second later.
+ *
+ * @returns {Promise<{cleared: string[], failed: Array<{store: string, message: string}>, preserved: string[], ok: boolean}>}
  */
 export async function resetEverything({ safetyCopy = true, keepInstitute = true } = {}) {
     session.require(CAPABILITIES.DATA_RESTORE, 'erase all data');
@@ -386,14 +456,33 @@ export async function resetEverything({ safetyCopy = true, keepInstitute = true 
     // Keep the school's own identity if asked — it is configuration, not data.
     const institute = keepInstitute ? await settings$.get('institute', null) : null;
 
-    for (const store of STORE_NAMES) {
-        await db.clear(store);
+    const cleared = [];
+    const failed = [];
+
+    for (const [store, repo] of Object.entries(ERASABLE_REPOS)) {
+        if (PRESERVED_ON_ERASE.includes(store)) continue;
+        try {
+            await repo.replaceAll([]);
+            cleared.push(store);
+        } catch (err) {
+            // Keep going. Stopping here would leave the remaining
+            // collections untouched *and* unreported, which is the failure
+            // mode this whole function is being fixed for.
+            console.error(`Could not clear ${store} during erase.`, err);
+            failed.push({ store, message: err.message });
+        }
     }
 
-    // Settings live in Firestore now, so the loop above (IndexedDB only)
-    // does not touch them — clear them explicitly, or every sequence
-    // counter and the school's own details would outlive the erase.
-    await settings$.replaceAll([]);
+    // The IndexedDB stores are all empty of live data by now, but the local
+    // database still physically holds whatever was last written there before
+    // each migration. Clearing it leaves no stale copy behind on this machine.
+    for (const store of STORE_NAMES) {
+        try {
+            await db.clear(store);
+        } catch (err) {
+            console.warn(`Could not clear the local copy of ${store}.`, err);
+        }
+    }
 
     // Written after the clear so it survives it. `seedIfEmpty` checks this
     // before deciding whether an empty database is a fresh install or a
@@ -414,8 +503,9 @@ export async function resetEverything({ safetyCopy = true, keepInstitute = true 
         localStorage.removeItem('natyam.session');
     } catch { /* private mode or storage disabled — nothing to clear */ }
 
-    bus.emit(EVENTS.DATA_IMPORTED, { reset: true });
-    return true;
+    const result = { cleared, failed, preserved: [...PRESERVED_ON_ERASE], ok: failed.length === 0 };
+    bus.emit(EVENTS.DATA_IMPORTED, { reset: true, ...result });
+    return result;
 }
 
 /* ------------------------------------------------------------------ HELPERS */

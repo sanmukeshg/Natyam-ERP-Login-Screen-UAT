@@ -25,12 +25,13 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatNumber } from '../../utils/money.js';
-import { localDate } from '../../utils/date.js';
-import { LEVELS, levelsOf } from '../../config/app.config.js';
+import { localDate, monthKey, formatMonth, formatDate } from '../../utils/date.js';
+import { LEVELS, levelsOf, ATTENDANCE_STATUS } from '../../config/app.config.js';
 
 import {
     WEEK, listBatches, batchDetail, createBatch, updateBatch, closeBatch, reopenBatch
 } from '../../services/batches.service.js';
+import { studentMonth } from '../../services/attendance.service.js';
 import { availableTeachers } from '../../services/staff.service.js';
 import { listBranches } from '../../services/settings.service.js';
 
@@ -429,13 +430,157 @@ export default class BatchesPage extends Page {
                 </div>
             `,
             actions: this.detailActions(batch),
-            onMount: (body, api) => {
-                on(body, 'click', '[data-student]', (_e, target) => {
-                    api.close(null);
-                    router.go(`/students?student=${target.dataset.student}`);
-                });
+            onMount: (body) => {
+                // Opens this student's attendance in place. It used to close
+                // the batch and navigate to the Students module, which threw
+                // away the roll you were working down and answered a question
+                // nobody had asked — the roll is where you check attendance,
+                // so the answer belongs here. The drawer stays layered over
+                // the batch, and the register-marking screen is never
+                // involved: this is a report, not a roll call.
+                on(body, 'click', '[data-student]', (_e, target) =>
+                    this.openStudentAttendance(target.dataset.student));
             }
         });
+    }
+
+    /* --------------------------------------------- STUDENT ATTENDANCE REPORT */
+
+    /**
+     * One student's month, opened from the batch roll and layered over it.
+     *
+     * Read-only by construction: it never routes to `/attendance`, so no
+     * amount of clicking around in here can land somebody on a roll call they
+     * did not mean to open — the marking screen is reached from the Timetable
+     * and nowhere else.
+     */
+    async openStudentAttendance(studentId, startMonth = monthKey()) {
+        let month = startMonth;
+
+        // A loop, not recursion: paging back through a year of months would
+        // otherwise leave a year's worth of nested awaits suspended, each
+        // holding its own drawer's closure alive for no reason.
+        for (;;) {
+            let report;
+            try {
+                report = await studentMonth({ studentId, month });
+            } catch (err) {
+                toast.error(err.message);
+                return;
+            }
+
+            const result = await drawer({
+                title: report.student.name,
+                description: report.batch
+                    ? `${report.batch.name} · attendance for ${formatMonth(report.month)}`
+                    : `Not in a batch · attendance for ${formatMonth(report.month)}`,
+                size: 'sm',
+                content: this.studentAttendanceView(report),
+                actions: [{ label: 'Close', variant: 'secondary', value: null }],
+                onMount: (body, api) => {
+                    on(body, 'click', '[data-month-shift]', (_e, target) => {
+                        const [y, m] = report.month.split('-').map(Number);
+                        api.close({ month: monthKey(new Date(y, m - 1 + Number(target.dataset.monthShift), 1)) });
+                    });
+                }
+            });
+
+            if (!result?.month) return;
+            month = result.month;
+        }
+    }
+
+    studentAttendanceView(report) {
+        const thisMonth = monthKey();
+        const marks = report.days.filter((d) => d.mark);
+
+        return html`
+            <div class="spread mb-4">
+                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="-1" aria-label="Previous month">
+                    ${raw(icon('chevron-left', { size: 15 }))}
+                </button>
+                <span class="type-strong">${formatMonth(report.month)}</span>
+                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="1"
+                        aria-label="Next month" ${report.month >= thisMonth ? 'disabled' : ''}>
+                    ${raw(icon('chevron-right', { size: 15 }))}
+                </button>
+            </div>
+
+            ${/* Three figures, not three cards. `grid-3` collapses to one
+                  column inside a drawer on a phone, which stacked these to
+                  roughly 340px of chrome before the day-by-day list — a lot
+                  of scrolling to reach the thing the drawer is for. This row
+                  stays three-across at every width because the values are
+                  short enough to. */''}
+            <div class="card"><div class="card-body">
+                <div class="stat-row">
+                    <div class="stat">
+                        <span class="stat-value">${report.rate === null ? '—' : `${report.rate}%`}</span>
+                        <span class="stat-label">Attendance</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">${formatNumber(report.present)}</span>
+                        <span class="stat-label">Present</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value">${formatNumber(report.absent)}</span>
+                        <span class="stat-label">Absent</span>
+                    </div>
+                </div>
+                <p class="type-caption type-muted text-center">
+                    ${marks.length
+                        ? `${marks.length} class${marks.length === 1 ? '' : 'es'} recorded this month`
+                        : 'Nothing recorded this month'}
+                </p>
+            </div></div>
+
+            ${report.unmarked ? html`
+                <div class="alert alert-warning">
+                    <p class="alert-body">
+                        ${formatNumber(report.unmarked)} class${report.unmarked === 1 ? '' : 'es'} this month
+                        ${report.unmarked === 1 ? 'has' : 'have'} no register yet, so ${report.unmarked === 1 ? 'it is' : 'they are'}
+                        not counted above.
+                    </p>
+                </div>
+            ` : ''}
+
+            <div class="card">
+                <div class="card-header"><h3 class="card-title">Day by day</h3></div>
+                <div class="card-body card-body-tight">
+                    ${report.days.length ? html`
+                        <ul class="stack stack-sm">
+                            ${report.days.map((day) => html`
+                                <li class="spread">
+                                    <div>
+                                        <span class="type-strong">${formatDate(day.date, { withYear: false })}</span>
+                                        ${day.isReplacement ? html`
+                                            <span class="badge badge-warning badge-sm">Rescheduled</span>
+                                        ` : ''}
+                                    </div>
+                                    ${this.dayMark(day)}
+                                </li>
+                            `)}
+                        </ul>
+                    ` : html`
+                        <div class="empty empty-compact">
+                            <p class="empty-text">
+                                ${report.batch
+                                    ? 'This batch held no classes this month.'
+                                    : 'This student is not in a batch, so there is no schedule to report against.'}
+                            </p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+
+    dayMark(day) {
+        if (day.status === 'cancelled') return html`<span class="type-caption type-muted">Cancelled</span>`;
+        if (day.status === 'postponed') return html`<span class="type-caption type-muted">Postponed</span>`;
+        if (day.mark === ATTENDANCE_STATUS.PRESENT) return html`<span class="badge badge-success">Present</span>`;
+        if (day.mark === ATTENDANCE_STATUS.ABSENT) return html`<span class="badge badge-danger">Absent</span>`;
+        return html`<span class="type-caption type-muted">Not marked</span>`;
     }
 
     detailActions(batch) {
