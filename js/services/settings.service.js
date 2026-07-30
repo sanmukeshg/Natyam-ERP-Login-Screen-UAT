@@ -16,7 +16,6 @@
 
 import { bus, EVENTS } from '../core/bus.js';
 import { session } from '../core/session.js';
-import { db } from '../core/db.js';
 import { localDate } from '../utils/date.js';
 import { toAmount } from '../utils/money.js';
 import { CAPABILITIES, ADMINISTRATOR_ONLY_CAPABILITIES, PREFERENCE_DEFAULTS, curriculum, levelLabel, levelsOf, roleTable, roleCapabilities, roleLabel, configureCurriculum, configureRoles, configureProgramTypes, configureExpenseCategories, programTypes, expenseCategories, DEFAULT_FEE_FREQUENCY, feeFrequency } from '../config/app.config.js';
@@ -671,27 +670,9 @@ export function setPreference(key, value) {
     return preferences();
 }
 
-/* ==========================================================================
-   STORAGE
-   ========================================================================== */
-
-/**
- * How much room the school's data is taking and whether the browser has
- * promised to keep it. Worth surfacing plainly: this application's data lives
- * in one browser on one machine, and a user who does not understand that will
- * not take backups.
- */
-export async function storageStatus() {
-    const [usage, persisted] = await Promise.all([db.usage(), navigator.storage?.persisted?.() ?? false]);
-    return {
-        ...usage,
-        persisted,
-        advice: persisted
-            ? 'This browser has been asked not to clear the school’s data automatically.'
-            : 'The browser may clear this data if the device runs low on space. Take regular backups.'
-    };
-}
-
-export async function requestPersistence() {
-    return db.requestPersistence();
-}
+/* Local browser-storage reporting (storageStatus/requestPersistence) was
+   removed once every collection had moved to Firestore: a quota reading and
+   a "the browser has promised to keep this data" prompt described an
+   architecture the app no longer has, and the Settings > Data tab was
+   presenting it as fact. The underlying db.usage()/db.requestPersistence()
+   helpers went with them (js/core/db.js). */

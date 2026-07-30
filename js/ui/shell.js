@@ -28,7 +28,6 @@ import { router } from '../core/router.js';
 import { NAVIGATION } from '../config/app.config.js';
 import { openPalette } from './palette.js';
 import { unreadCount } from '../services/notifications.service.js';
-import { storageStatus } from '../services/settings.service.js';
 import { backupStatus } from '../services/backup.service.js';
 import { logout } from '../services/auth.service.js';
 
@@ -120,7 +119,6 @@ export class Shell {
                     <main class="viewport" id="main" data-role="viewport" tabindex="-1"></main>
 
                     <footer class="app-footer">
-                        <span class="storage-pill" data-role="storage"></span>
                         <span data-role="backup"></span>
                     </footer>
                 </div>
@@ -254,21 +252,16 @@ export class Shell {
     }
 
     /**
-     * The footer states plainly where the data lives and when it was last
-     * backed up. This app holds a school's entire record set in one browser
-     * profile; a person who never sees that fact will not take a backup until
-     * the morning it matters.
+     * The footer says when the school last took a backup. It used to also
+     * report local browser-storage state ("Stored in this browser,
+     * protected") — true when this app kept the entire record set in one
+     * browser profile, and untrue since every collection moved to
+     * Firestore. A backup reminder is still worth showing; a claim about
+     * where the data lives is not ours to make from a storage-quota API.
      */
     async refreshFooter() {
         try {
-            const [storage, backup] = await Promise.all([storageStatus(), backupStatus()]);
-
-            render(this.root.querySelector('[data-role="storage"]'), html`
-                <span class="storage-dot" data-state="${storage.persisted ? 'ok' : 'warn'}"></span>
-                <span>${storage.persisted
-                    ? 'Stored in this browser, protected'
-                    : 'Stored in this browser, unprotected'}</span>
-            `);
+            const backup = await backupStatus();
 
             render(this.root.querySelector('[data-role="backup"]'), html`
                 <a href="#/settings?tab=data">${backup.message}</a>

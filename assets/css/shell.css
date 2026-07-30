@@ -321,11 +321,6 @@
     flex-wrap: wrap;
 }
 
-.storage-pill { display: inline-flex; align-items: center; gap: var(--space-2); }
-.storage-dot { width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--success-500); }
-.storage-dot[data-state="warn"] { background: var(--warning-500); }
-.storage-dot[data-state="error"] { background: var(--danger-500); }
-
 /* ==========================================================================
    COMMAND PALETTE
    ========================================================================== */

@@ -1,3 +1,30 @@
+# Release Notes — NATYAM ERP v2.23.1
+
+**Release:** Remove IndexedDB-era claims from the UI
+**Date:** 30 July 2026
+**Baseline:** v2.23.0
+**Type:** Copy and UI correction — the app was describing an architecture it no longer has.
+
+## What changed for the academy
+
+- **Settings → Data no longer says the school's records live in this browser on this computer.** They live in Natyam's cloud database, and have since the Firestore migration. The backup reminder now gives the real reason to keep taking backups — your own offline copy for an audit, a hand-over, or undoing a bulk change that went wrong.
+- **The "Storage" box is gone** from that same tab (Used / Available / Protected from clearing, and the "Ask the browser to keep this data" button). It was measuring space inside the browser, which is not where the records are.
+- **The bar along the bottom of every screen no longer claims "Stored in this browser".** It still tells you when the last backup was taken.
+- The "Erase everything" and "Restore" confirmation dialogs, and the "Start again" description, were reworded for the same reason.
+
+## For administrators / IT
+
+- **No `firestore.rules` change, no data migration, no manual step.** Nothing about how data is stored or read changed in this release — only what the screens claim about it, plus the removal of the dead code behind those claims.
+- One message that deliberately still mentions the browser: the start-up failure screen ("The school's database could not be opened in this browser"). That one is accurate — the app does still use local browser storage for session and installation state, and that is genuinely what has failed when you see it.
+
+## Quality
+
+- Static analysis clean: all imports resolve, no import cycles, no undefined identifiers across 129 modules.
+- Removed code was verified to have exactly one caller each before removal, and the CSS for the deleted footer indicator was removed in the same pass so nothing is left orphaned.
+- Not verified interactively: this session had no way to sign in. Worth a glance at Settings → Data and the footer after deploy.
+
+---
+
 # Release Notes — NATYAM ERP v2.23.0
 
 **Release:** IAM — Owner role upgrade

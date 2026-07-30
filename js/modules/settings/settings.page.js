@@ -38,7 +38,7 @@ import {
     listAcademicYears, createAcademicYear, setCurrentYear,
     listFeePlans, createFeePlan, updateFeePlan, deleteFeePlan,
     listUsers, createUser, updateUser, deactivateUser,
-    roleMatrix, preferences, setPreference, storageStatus, requestPersistence,
+    roleMatrix, preferences, setPreference,
     listMasterSet, addMasterEntry, updateMasterEntry, setMasterEntryStatus,
     deleteMasterEntry, moveMasterEntry, masterEntryUsage, MASTER_SETS
 } from '../../services/settings.service.js';
@@ -1366,7 +1366,7 @@ export default class SettingsPage extends Page {
     /* ------------------------------------------------------------------ DATA */
 
     async dataPanel() {
-        const [status, storage] = await Promise.all([backupStatus(), storageStatus()]);
+        const status = await backupStatus();
 
         return html`
             <div class="alert ${status.stale ? 'alert-warning' : 'alert-info'}">
@@ -1374,57 +1374,36 @@ export default class SettingsPage extends Page {
                     ${status.stale ? 'Take a backup' : 'Backups are current'}
                 </div>
                 <p class="alert-body">
-                    ${status.message} This school's records live in this browser, on this computer.
-                    There is no server holding a copy. A backup file is the only thing standing between
-                    a cleared browser and losing everything.
+                    ${status.message} The school's records are held in Natyam's cloud database, not on
+                    this computer. A backup is still worth taking as your own offline copy — for an
+                    audit, a hand-over, or undoing a bulk change that went wrong.
                 </p>
                 ${session.can('backup.create') ? html`
                     <button class="btn btn-sm btn-primary" data-do="backup">Download a backup now</button>
                 ` : ''}
             </div>
 
-            <div class="grid grid-2">
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">Storage</h2>
-                        <p class="card-subtitle">${storage.advice}</p>
-                    </div>
-                    <div class="card-body">
-                        ${summaryList([
-                            ['Used', storage.usageLabel || `${formatNumber(Math.round((storage.usage || 0) / 1024))} KB`],
-                            ['Available', storage.quotaLabel || '—'],
-                            ['Protected from clearing', storage.persisted ? 'Yes' : 'No']
-                        ])}
-                        ${!storage.persisted ? html`
-                            <button class="btn btn-sm btn-secondary mt-2" data-do="persist">
-                                Ask the browser to keep this data
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Move data in and out</h2>
+                    <p class="card-subtitle">CSV for spreadsheets, JSON for whole sections.</p>
+                </div>
+                <div class="card-body">
+                    <div class="stack stack-sm">
+                        ${session.can('student.edit') ? html`
+                            <button class="btn btn-secondary" data-do="import">
+                                ${raw(icon('upload', { size: 15 }))} Import from a spreadsheet
                             </button>
                         ` : ''}
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">Move data in and out</h2>
-                        <p class="card-subtitle">CSV for spreadsheets, JSON for whole sections.</p>
-                    </div>
-                    <div class="card-body">
-                        <div class="stack stack-sm">
-                            ${session.can('student.edit') ? html`
-                                <button class="btn btn-secondary" data-do="import">
-                                    ${raw(icon('upload', { size: 15 }))} Import from a spreadsheet
-                                </button>
-                            ` : ''}
-                            ${session.can('data.export') ? html`
-                                <button class="btn btn-secondary" data-do="export-store">
-                                    ${raw(icon('download', { size: 15 }))} Export one section as JSON
-                                </button>
-                            ` : ''}
-                            <p class="type-caption type-muted">
-                                Per-report CSV exports live on the reports screen, where the columns
-                                and filters are already chosen.
-                            </p>
-                        </div>
+                        ${session.can('data.export') ? html`
+                            <button class="btn btn-secondary" data-do="export-store">
+                                ${raw(icon('download', { size: 15 }))} Export one section as JSON
+                            </button>
+                        ` : ''}
+                        <p class="type-caption type-muted">
+                            Per-report CSV exports live on the reports screen, where the columns
+                            and filters are already chosen.
+                        </p>
                     </div>
                 </div>
             </div>
@@ -1457,7 +1436,7 @@ export default class SettingsPage extends Page {
                     </div>
                     <div class="card-body">
                         <p class="type-body">
-                            Erases every student, payment, register and certificate held in this browser.
+                            Erases every student, payment, register and certificate the school holds.
                             Intended for clearing demonstration data before the school begins real use.
                         </p>
                         <button class="btn btn-danger mt-2" data-do="reset">Erase everything</button>
@@ -1470,14 +1449,6 @@ export default class SettingsPage extends Page {
     async takeBackup() {
         await downloadBackup({ note: 'Manual backup from settings' });
         toast.success('Backup downloaded. Keep it somewhere that is not this computer.');
-        await this.paint();
-    }
-
-    async persist() {
-        const granted = await requestPersistence();
-        toast[granted ? 'success' : 'warning'](granted
-            ? 'The browser has agreed to keep this data.'
-            : 'The browser declined. Keep taking backups.');
         await this.paint();
     }
 
@@ -1523,7 +1494,7 @@ export default class SettingsPage extends Page {
                 `and holds ${formatNumber(inspection.recordCount)} records`,
                 inspection.summary?.students ? `including ${inspection.summary.students} students.` : '.',
                 '',
-                'Everything currently in this browser will be replaced.',
+                'Everything the school currently holds will be replaced.',
                 'A safety copy of the current data will download first.',
                 ...inspection.warnings
             ].join(' '),
@@ -1545,7 +1516,7 @@ export default class SettingsPage extends Page {
     async resetFlow() {
         const confirmed = await confirmTyped({
             title: 'Erase every record?',
-            message: 'Every student, payment, register, certificate and ledger entry in this browser will '
+            message: 'Every student, payment, register, certificate and ledger entry the school holds will '
                 + 'be deleted. A safety copy downloads first, and it will be the only copy left.',
             phrase: 'ERASE',
             confirmLabel: 'Erase everything'

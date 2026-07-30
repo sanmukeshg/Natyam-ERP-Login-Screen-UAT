@@ -150,7 +150,7 @@ export async function downloadBackup({ note = null } = {}) {
 export async function backupStatus() {
     const last = await settings$.get('lastBackupAt', null);
     if (!last) {
-        return { everBackedUp: false, lastAt: null, ageDays: null, stale: true, message: 'No backup has ever been taken from this browser.' };
+        return { everBackedUp: false, lastAt: null, ageDays: null, stale: true, message: 'No backup has ever been taken.' };
     }
 
     const ageDays = Math.floor((Date.now() - new Date(last).getTime()) / 86400000);

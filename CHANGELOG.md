@@ -9,6 +9,25 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.23.1] — 2026-07-30 — Remove IndexedDB-era claims from the UI
+
+The Settings → Data tab and the shell footer still described the pre-Firestore architecture, where the school's entire record set lived in one browser profile. Every collection has been on Firestore since v2.15.0 (and `settings` since v2.23.0), so this copy had been telling the user something untrue for some time. Raised from a UAT observation document.
+
+### Changed
+- **Settings → Data — the "Take a backup" banner** no longer says "This school's records live in this browser, on this computer. There is no server holding a copy. A backup file is the only thing standing between a cleared browser and losing everything." It now states where the records actually are, and gives the real reason a backup is still worth taking (an offline copy for an audit, a hand-over, or undoing a bad bulk change).
+- **"Start again" and both typed-confirmation dialogs** (Restore, Erase everything) no longer describe the data as being "in this browser".
+- **`backupStatus()`'s never-backed-up message** dropped "from this browser" — it was implying backups were per-machine.
+
+### Removed
+- **The "Storage" card** from Settings → Data (Used / Available / Protected from clearing, and the "Ask the browser to keep this data" button). It reported local IndexedDB quota and a browser eviction promise — neither of which has anything to do with where the school's records are held.
+- **The shell footer's "Stored in this browser, protected/unprotected" indicator.** The footer's backup-age reminder stays; only the storage claim went.
+- `storageStatus()` / `requestPersistence()` (`settings.service.js`) and the `db.usage()` / `db.requestPersistence()` helpers behind them (`core/db.js`), each of which had exactly one caller — all removed together, plus the now-unused `.storage-pill` / `.storage-dot` CSS.
+
+### Deliberately left alone
+- **`app.js`'s fatal boot-error screen** ("The school's database could not be opened in this browser") — that is a genuine local IndexedDB open failure. IndexedDB is still used locally for session and installation state, so this message remains accurate.
+
+---
+
 ## [2.23.0] — 2026-07-30 — IAM: Owner role upgrade
 
 An intentional business-rule change, not a fix. `owner_accountant` was a narrow,

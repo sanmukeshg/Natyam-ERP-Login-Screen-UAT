@@ -374,23 +374,11 @@ export class Database {
         return summary;
     }
 
-    /** Best-effort storage usage, for the footer indicator. */
-    async usage() {
-        if (!navigator.storage?.estimate) return null;
-        const { usage = 0, quota = 0 } = await navigator.storage.estimate();
-        return { usage, quota, percent: quota ? (usage / quota) * 100 : 0 };
-    }
-
-    /**
-     * Asks the browser to exempt this origin from eviction under storage
-     * pressure. Offline-first data that the browser may silently delete is not
-     * actually offline-first.
-     */
-    async requestPersistence() {
-        if (!navigator.storage?.persist) return false;
-        if (await navigator.storage.persisted()) return true;
-        return navigator.storage.persist();
-    }
+    /* usage() and requestPersistence() were removed alongside the Settings >
+       Data tab's Storage card and the shell footer's storage indicator. Both
+       reported on local browser storage, which stopped being where the
+       school's records live once every collection moved to Firestore —
+       see js/services/settings.service.js for the same note. */
 }
 
 export const db = new Database();
