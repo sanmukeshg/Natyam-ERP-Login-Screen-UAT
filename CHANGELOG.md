@@ -9,6 +9,40 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.1] — 2026-08-01 — Fix desktop layout regressions found in local UAT testing
+
+Two visual bugs reported against v2.26.0's Landing/Login redesign, both traced
+to the same root cause: `.auth-wordmark` and `.glass-card` are percentage-width
+elements nested inside `align-items: center` flex containers
+(`.auth-brand-block`, `.auth-signin-inner`). Without an explicit width on
+those wrapper elements, they shrink-to-fit their content instead of filling
+the column — and since their children are now `background-image` divs with
+no intrinsic content (converted from `<img>` in v2.26.0 to stop cross-
+breakpoint image waste), "shrink to fit" resolved to nearly nothing.
+
+### Fixed
+- **The wordmark rendered far smaller than its intended ~420px** — now sizes
+  and centers correctly by giving `.auth-brand-block` an explicit `width:
+  100%` so the percentage width inside it has something definite to resolve
+  against.
+- **The login card rendered much narrower than its intended 400px** — same
+  fix applied to `.auth-signin-inner`, plus explicit `margin: 0 auto` on
+  `.glass-card` itself, since its parent no longer flex-centers it once
+  stretched to full width.
+- **Desktop/tablet no longer stretches the landing photo across the whole
+  viewport.** On a large monitor this left the medallion and wordmark looking
+  sparse in a sea of empty terracotta. Desktop (≥901px) now renders a
+  bounded, centered `1360×660` card — rounded corners, shadow, on a neutral
+  page backdrop — matching the approved artifact's own presentation. Mobile
+  is unchanged (already confirmed correct).
+- **Removed the animated shine/glow effect** on both "Get Started" buttons
+  (a canvas-drawn highlight sweeping the button border) per direct feedback
+  that it read as a visual glitch rather than a feature. Removed from both
+  breakpoints for a consistent experience, along with the now-dead
+  `attachSpecularGlow()` function and its canvas elements/CSS.
+
+---
+
 ## [2.26.0] — 2026-07-31 — Landing, Login, and Boot screens redesigned to approved brand artwork
 
 Replaces the plain login form and the minimal boot splash with the visual

@@ -8,7 +8,7 @@
 
 export const APP = Object.freeze({
     name: 'Natyam ERP',
-    version: '2.26.0',
+    version: '2.26.1',
     organisation: 'NATYAM — School of Kuchipudi',
     locale: 'en-IN',
     currency: 'INR',

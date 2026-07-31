@@ -1,3 +1,30 @@
+# Release Notes — NATYAM ERP v2.26.1
+
+**Release:** Fix desktop layout regressions found in local UAT testing
+**Date:** 1 August 2026
+**Baseline:** v2.26.0
+**Type:** Bug-fix patch — two visual regressions reported from local testing of the new Landing/Login screens, both fixed at the root cause; no functional or architectural change.
+
+## What changed for the academy
+
+- **The "Natyam / School of Kuchipudi" wordmark on the desktop landing screen now displays at its full intended size**, instead of appearing much smaller than the artwork it's built from.
+- **The sign-in card is back to its proper width** instead of the narrow, thin panel seen in local testing.
+- **On larger monitors, the landing/login screen now appears as a centered, framed panel** with the surrounding area shown in a plain neutral background, matching the approved design, instead of the artwork stretching edge-to-edge and leaving the medallion and text looking sparse and disconnected on a big screen. Phones are unaffected — already confirmed correct.
+- **The animated glow around the "Get Started" button has been removed**, on both desktop and phone, based on direct feedback that it looked like a glitch rather than a polish detail.
+
+## For administrators / IT
+
+- Root cause of the two sizing bugs: a CSS side effect of the bandwidth-saving change in v2.26.0 (converting two images to background styling instead of `<img>` tags) interacting with a centering layout rule — the browser had nothing definite to measure the percentage-based image widths against, so they collapsed. Fixed by giving their containers an explicit width; no images or markup structure changed.
+- No Firebase, Firestore, routing, or authentication logic touched.
+
+## Quality
+
+- Verified by exact on-screen measurement (not just visual inspection): the wordmark now renders at precisely 420px and the sign-in card at precisely 400px, both correctly centered, at both a 1440px and a 1920px browser width.
+- Re-confirmed the phone layout is unaffected by any of these changes.
+- No console errors; CSS coverage check clean.
+
+---
+
 # Release Notes — NATYAM ERP v2.26.0
 
 **Release:** Landing, Login, and Boot screens redesigned to approved brand artwork

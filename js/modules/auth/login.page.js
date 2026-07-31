@@ -227,7 +227,6 @@ export function renderLogin(container, { initialError = null } = {}) {
                     <div class="auth-hero-mobile-img" role="img" aria-label="Natyam — School of Kuchipudi"></div>
                     <div class="auth-tap-wrap">
                         <div class="auth-tap-shape"></div>
-                        <canvas class="auth-tap-fx" data-role="tap-fx"></canvas>
                         <span class="auth-tap-label">Get Started</span>
                         <button class="auth-tap-btn" type="button" data-role="show-login-btn" aria-label="Get Started"></button>
                     </div>
@@ -241,10 +240,7 @@ export function renderLogin(container, { initialError = null } = {}) {
                                 <div class="auth-wordmark" role="img" aria-label="Natyam — School of Kuchipudi"></div>
                                 <p class="auth-unit-tag">— Unit of SSMDA —</p>
                             </div>
-                            <span class="auth-shine-wrap">
-                                <canvas class="auth-btn-fx" data-role="cta-fx"></canvas>
-                                <button class="auth-cta-btn" type="button" data-role="show-login-btn">Get Started</button>
-                            </span>
+                            <button class="auth-cta-btn" type="button" data-role="show-login-btn">Get Started</button>
                         </div>
 
                         <div class="auth-signin" data-role="signin-panel">
@@ -257,8 +253,9 @@ export function renderLogin(container, { initialError = null } = {}) {
 
                     </div>
                 </div>
+
+                <div class="auth-foot"><span>© ${new Date().getFullYear()} Natyam School</span></div>
             </div>
-            <div class="auth-foot"><span>© ${new Date().getFullYear()} Natyam School</span></div>
         </div>
     `);
 
@@ -476,140 +473,4 @@ export function renderLogin(container, { initialError = null } = {}) {
         applyMode('email');
         identifierInput.focus();
     });
-
-    /* ------------------------------------------------------ SPECULAR GLOW FX */
-    attachSpecularGlow(heroDesktop.querySelector('.auth-shine-wrap'), heroDesktop.querySelector('[data-role="cta-fx"]'), { radius: null, autoplayMs: 0 });
-    attachSpecularGlow(heroMobile.querySelector('.auth-tap-wrap'), heroMobile.querySelector('[data-role="tap-fx"]'), { radius: 14, autoplayMs: 4800 });
-}
-
-/**
- * A soft highlight that hugs a rounded-rect button's edge and steers toward
- * the pointer, fading in with proximity — drawn on a 2D canvas since this
- * app has no build step/WebGL pipeline to host a shader version. Purely
- * decorative; skipped entirely under prefers-reduced-motion so nobody gets a
- * glow that animates forever with no way to turn it off.
- *
- * @param {HTMLElement} wrap positioned ancestor sized to the button + padding
- * @param {HTMLCanvasElement} canvas the `.auth-*-fx` canvas inside `wrap`
- * @param {{radius: number|null, autoplayMs: number}} opts `radius` null = pill (min(w,h)/2)
- */
-function attachSpecularGlow(wrap, canvas, { radius: fixedRadius, autoplayMs }) {
-    if (!wrap || !canvas) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    const btn = wrap.querySelector('button');
-    const ctx = canvas.getContext('2d');
-    const PAD = 16;
-    const PROXIMITY = 200;
-    const SPEED = 0.35;
-    let w = 0, h = 0, radius = 0;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    function resize() {
-        const r = btn.getBoundingClientRect();
-        w = r.width; h = r.height;
-        radius = fixedRadius ?? Math.min(w, h) / 2;
-        canvas.width = Math.round((w + PAD * 2) * dpr);
-        canvas.height = Math.round((h + PAD * 2) * dpr);
-        canvas.style.width = `${w + PAD * 2}px`;
-        canvas.style.height = `${h + PAD * 2}px`;
-        canvas.style.left = `${-PAD}px`;
-        canvas.style.top = `${-PAD}px`;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    const resizeObserver = new ResizeObserver(resize);
-    resizeObserver.observe(btn);
-    resize();
-    // Fonts/entrance-animations can settle a frame or two after the first
-    // synchronous layout, which would otherwise leave the canvas sized for a
-    // stale (smaller) button and make the glow ring miss the real edges.
-    requestAnimationFrame(resize);
-    setTimeout(resize, 60);
-    setTimeout(resize, 400);
-    if (document.fonts?.ready) document.fonts.ready.then(resize);
-
-    function roundRectPath(x, y, rw, rh, r) {
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.arcTo(x + rw, y, x + rw, y + rh, r);
-        ctx.arcTo(x + rw, y + rh, x, y + rh, r);
-        ctx.arcTo(x, y + rh, x, y, r);
-        ctx.arcTo(x, y, x + rw, y, r);
-        ctx.closePath();
-    }
-
-    let angle = 0, idleAngle = 0, bright = 0, proximityT = 0, pointerAngle = null;
-    const autoplayStart = performance.now();
-
-    function pointerFrom(clientX, clientY) {
-        const r = btn.getBoundingClientRect();
-        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-        const dx = Math.max(r.left - clientX, 0, clientX - r.right);
-        const dy = Math.max(r.top - clientY, 0, clientY - r.bottom);
-        const dist = Math.hypot(dx, dy);
-        pointerAngle = Math.atan2(clientY - cy, clientX - cx);
-        const t = Math.max(0, 1 - dist / PROXIMITY);
-        proximityT = t * t * (3 - 2 * t);
-    }
-    const onPointerMove = (e) => pointerFrom(e.clientX, e.clientY);
-    const onTouchStart = (e) => {
-        const t0 = e.touches?.[0];
-        if (!t0) return;
-        pointerFrom(t0.clientX, t0.clientY);
-        proximityT = 0.9;
-    };
-    window.addEventListener('pointermove', onPointerMove);
-    if (autoplayMs > 0) window.addEventListener('touchstart', onTouchStart, { passive: true });
-
-    // renderLogin() can run again over the page's life (app.js re-renders
-    // the whole screen after a provisioning rejection), which orphans this
-    // canvas/button — `container.innerHTML` replaces them, but nothing else
-    // stops this rAF loop or the two window-level listeners above. Once the
-    // canvas is no longer in the document, tear everything down instead of
-    // running forever against detached nodes.
-    let last = performance.now();
-    (function frame(now) {
-        if (!canvas.isConnected) {
-            window.removeEventListener('pointermove', onPointerMove);
-            if (autoplayMs > 0) window.removeEventListener('touchstart', onTouchStart);
-            resizeObserver.disconnect();
-            return;
-        }
-        requestAnimationFrame(frame);
-        const dt = Math.min((now - last) / 1000, 0.05);
-        last = now;
-        idleAngle += SPEED * dt;
-        const target = pointerAngle != null ? pointerAngle : idleAngle;
-        const diff = ((target - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-        angle += diff * (1 - Math.exp(-dt * 7));
-
-        let effectiveTarget = proximityT;
-        if (autoplayMs > 0) {
-            const elapsed = now - autoplayStart;
-            const autoplayT = elapsed < autoplayMs ? (1 - elapsed / autoplayMs) : 0;
-            effectiveTarget = Math.max(proximityT, autoplayT);
-        }
-        bright += (effectiveTarget - bright) * (1 - Math.exp(-dt * 8));
-
-        ctx.clearRect(0, 0, w + PAD * 2, h + PAD * 2);
-        if (bright > 0.008) {
-            const cx = PAD + w / 2, cy = PAD + h / 2;
-            const grad = ctx.createConicGradient(angle - Math.PI, cx, cy);
-            grad.addColorStop(0, `rgba(255,255,255,${0.95 * bright})`);
-            grad.addColorStop(0.06, 'rgba(255,255,255,0)');
-            grad.addColorStop(0.44, 'rgba(255,255,255,0)');
-            grad.addColorStop(0.5, `rgba(255,255,255,${0.95 * bright})`);
-            grad.addColorStop(0.56, 'rgba(255,255,255,0)');
-            grad.addColorStop(0.94, 'rgba(255,255,255,0)');
-            grad.addColorStop(1, `rgba(255,255,255,${0.95 * bright})`);
-            ctx.save();
-            ctx.shadowColor = `rgba(240,196,106,${0.85 * bright})`;
-            ctx.shadowBlur = 10;
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = grad;
-            roundRectPath(PAD, PAD, w, h, radius);
-            ctx.stroke();
-            ctx.restore();
-        }
-    })(last);
 }
