@@ -45,6 +45,16 @@
     --brand-gold-500: #D4A373;
     --brand-gold-700: #A87D51;
 
+    /* ------------------------------------------------------ FRONT DOOR ONLY */
+    /* Sampled from the school's logo artwork. Used only by the landing/login
+       screen (assets/css/auth.css) — never reassigned by [data-theme="dark"],
+       never used by an interior/daily-use screen. */
+    --logo-gold:  #F0C46A;
+    --logo-cream: #F4E3BE;
+
+    --duration-reveal: 580ms;
+    --ease-reveal: cubic-bezier(0.16, 1, 0.3, 1);
+
     /* -------------------------------------------------------------- NEUTRAL */
     /* Cool-neutral, very slightly blue. Reads as paper under office light and
        keeps long tabular sessions calm. */

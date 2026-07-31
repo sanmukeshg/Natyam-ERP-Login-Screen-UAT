@@ -792,46 +792,7 @@ button.calendar-day:hover { border-color: var(--border-strong); }
 
 /* ==========================================================================
    LOGIN SCREEN
-   Rendered directly into #app, before the Shell mounts — see js/app.js.
+   Moved to assets/css/auth.css — this screen is deliberately theme-
+   independent (never reads --surface-*/--text-*/--accent) and large enough
+   (~300+ lines) to warrant its own file rather than living in this one.
    ========================================================================== */
-
-.auth-screen {
-    min-height: 100vh;
-    min-height: 100dvh;
-    display: grid;
-    place-items: center;
-    padding: var(--space-6);
-    background: var(--surface-canvas);
-}
-
-.auth-card {
-    width: 100%;
-    max-width: 380px;
-    box-shadow: var(--shadow-lg);
-}
-
-.auth-brand {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-5);
-    background: var(--brand-indigo-800);
-}
-
-.auth-title {
-    font-family: var(--font-display);
-    font-size: var(--text-xl);
-    font-weight: var(--weight-semibold);
-    letter-spacing: var(--tracking-tight);
-    margin-bottom: var(--space-1);
-}
-
-.auth-subtitle {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-5);
-}
-
-.auth-card form { display: flex; flex-direction: column; gap: var(--space-4); }
-.auth-card .btn-block { margin-top: var(--space-2); gap: var(--space-2); }
-.auth-card [data-role="banner"]:not(:empty) { margin-bottom: var(--space-4); }

@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="assets/css/components.css">
     <link rel="stylesheet" href="assets/css/shell.css">
     <link rel="stylesheet" href="assets/css/modules.css">
+    <link rel="stylesheet" href="assets/css/auth.css">
 
     <!--
       The theme is applied before the stylesheets finish and before any module
@@ -44,9 +45,16 @@
 <body>
     <div id="app"></div>
 
-    <div id="boot" class="boot">
-        <div class="boot-mark" aria-hidden="true">॥</div>
-        <p class="boot-text">NATYAM – School of Kuchipudi</p>
+    <div id="boot" class="boot-screen" role="status" aria-live="polite">
+        <div class="boot-mark"><img src="assets/img/brand/medallion.jpg" alt="Natyam ERP"></div>
+        <div class="boot-name">Natyam ERP</div>
+        <div class="boot-bar"><i></i></div>
+        <div class="boot-msg">
+            <span>Preparing dashboard…</span>
+            <span>Loading student data…</span>
+            <span>Syncing records…</span>
+            <span>Almost ready…</span>
+        </div>
     </div>
 
     <noscript>

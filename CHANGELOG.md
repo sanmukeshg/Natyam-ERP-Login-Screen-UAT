@@ -9,6 +9,78 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.0] — 2026-07-31 — Landing, Login, and Boot screens redesigned to approved brand artwork
+
+Replaces the plain login form and the minimal boot splash with the visual
+design approved across three Claude Artifacts (Desktop Landing Page, Mobile
+Landing Page Preview, Mobile Boot Screen, plus the Boot/Loading mockup bundled
+in the Desktop artifact) — a terracotta/gold "front door" identity built from
+the school's own logo artwork, kept fully separate from the indigo/neutral
+system the rest of the app uses for daily work. No Firebase, Firestore,
+routing, or authentication logic changed; every existing sign-in path (email
+& password, Google, Mobile OTP) keeps working exactly as before, restyled in
+place.
+
+### Added
+- **New Landing → Login screen** (`js/modules/auth/login.page.js`,
+  `assets/css/auth.css`): a "Get Started" hero (desktop: live medallion +
+  wordmark + shine-tagline composition; mobile: a single pre-baked full-bleed
+  image) reveals a frosted glass sign-in card on click — same card, same
+  fields, repositioned per breakpoint rather than duplicated in the DOM.
+  Breakpoint switches at 900px, matching the Desktop artifact's own tested
+  collapse point.
+- **Remember me.** A same-device convenience, new to this screen: checking it
+  saves the identifier field to `localStorage` and prefills it next visit.
+  Purely local persistence — never read by `auth.service.js` or Firebase, no
+  session or business-logic change.
+- **New boot screen** (`#boot` in `index.html`, styled in `assets/css/auth.css`):
+  pulsing medallion mark, gold progress bar, and rotating status messages,
+  replacing the single static caption. Desktop uses a terracotta gradient;
+  mobile reuses the login screen's own background photo.
+- **Five brand images** extracted from the approved artifacts into
+  `assets/img/brand/` (dancer medallion, wordmark lockup, two full-bleed
+  background photos, one pre-baked mobile hero composite) — the repo had no
+  brand imagery before this.
+- **`--logo-gold`/`--logo-cream` tokens** in `tokens.css`, scoped to these
+  front-door screens only and never reassigned by `[data-theme="dark"]` — the
+  login/boot screens are deliberately theme-independent, matching the
+  artwork, while the rest of the app's light/dark system is untouched.
+- **`.btn-google`** added to `components.css` as a real, reusable button
+  variant rather than a one-off style.
+
+### Fixed
+- Mobile OTP sign-in (dynamic identifier-mode detection, password field
+  hide/show, "Send OTP"/"Login" button relabeling) is preserved and restyled
+  to match the glass card, even though neither approved artifact depicted it.
+- A rejection message passed back into `renderLogin()` after a failed
+  provisioning check now mounts the screen directly into the sign-in state so
+  the error is visible immediately, instead of being rendered behind the
+  still-hidden hero.
+- `login.page.js` now disposes its own delegated listeners before re-wiring
+  them on a second render (`showLoginScreen()` can call it again without an
+  unmount in between) — previously each re-render stacked a duplicate set of
+  handlers on `#app`, firing every click/submit action once per accumulated
+  render.
+- The medallion, wordmark, and mobile hero images are CSS `background-image`
+  rather than `<img>`, so the browser no longer downloads the other
+  breakpoint's imagery on every load (~280–305KB of previously wasted
+  transfer, depending on device).
+- A canvas-drawn specular highlight on the "Get Started" buttons now stops
+  its animation loop and removes its listeners once its canvas is no longer
+  in the document, instead of continuing to run against detached nodes after
+  a re-render.
+
+### Changed
+- Old `.auth-screen`/`.auth-card` rules removed from `modules.css`; old
+  `.boot`/`.boot-mark`/`.boot-text`/`.boot-error` rules removed from
+  `shell.css`. Both screens' styling now lives together in the new
+  `assets/css/auth.css`, since they share one theme-independent system that
+  the rest of the app's stylesheets don't.
+- `tools/dev-server.cjs` now serves `.jpg`/`.jpeg` with the correct MIME type
+  (needed for the new brand images; previously unset).
+
+---
+
 ## [2.25.0] — 2026-07-31 — Attendance overlay UX: in-place month paging, reuse across Batch/Students/Timetable
 
 A UX enhancement round from "New Requirements and Observation 2.23.2":

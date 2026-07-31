@@ -1,3 +1,31 @@
+# Release Notes — NATYAM ERP v2.26.0
+
+**Release:** Landing, Login, and Boot screens redesigned to approved brand artwork
+**Date:** 31 July 2026
+**Baseline:** v2.25.0
+**Type:** Visual redesign of the app's entry screens, implementing three approved Claude Artifacts (Desktop Landing Page, Mobile Landing Page Preview, Mobile Boot Screen) plus the Boot/Loading mockup bundled in the Desktop artifact. No Firebase, Firestore, routing, or authentication logic changed.
+
+## What changed for the academy
+
+- **The sign-in screen has a new look**, built from the school's own logo artwork: a warm terracotta-and-gold "front door" identity, separate from the calm indigo look used inside the app once you're signed in. On a desktop or tablet, a "Get Started" screen with the school medallion and wordmark opens into a frosted glass sign-in card. On a phone, a full-screen photo of the medallion opens the same card, sliding in from the side.
+- **Every existing way of signing in still works exactly as before** — email and password, Google, and Mobile OTP (including the code-verification step) — just restyled to match the new card. Nothing about what information is needed or how it's checked has changed.
+- **A new "Remember me" option** on the sign-in card saves your email or phone number on this device so it's already filled in next time. It only remembers what you typed — it doesn't keep you signed in or skip your password.
+- **The loading screen you see for a moment while the app opens** now shows the school medallion with a soft pulse, a progress bar, and a few rotating status lines, instead of a plain "NATYAM – School of Kuchipudi" caption.
+
+## For administrators / IT
+
+- **No `firestore.rules` change, no schema change, no migration, no change to any sign-in provider's configuration.** This release only touches how the entry screens look and are built; the underlying Firebase Authentication flows are untouched.
+- Five new image assets live under `assets/img/brand/` (extracted from the approved artifacts) — nothing else changed in how the app is deployed or served; it remains build-free, dependency-free static files.
+- The old plain sign-in form and boot caption were removed along with the styles that were unique to them — nothing was left half-migrated.
+
+## Quality
+
+- Verified in-browser at both desktop (1280px) and mobile (375px) widths: hero-to-sign-in reveal and back navigation, all three sign-in methods' UI wiring, the new Remember-me persistence (save/prefill/clear), a simulated provisioning-rejection message, dark-mode independence (pixel-identical to light mode, by design), and reduced-motion behavior. No console errors on any of the above.
+- A pre-existing framework limitation was found and fixed during review: repeated calls to the login screen's render function (which can happen after a failed sign-in attempt) were stacking duplicate event handlers rather than replacing them. Verified fixed with an isolated test — three re-renders now leave exactly one render's worth of active handlers, not three.
+- Confirmed the new images don't get downloaded on the "wrong" device — a phone no longer fetches the desktop background and wordmark, and a desktop no longer fetches the phone's full-screen hero image.
+
+---
+
 # Release Notes — NATYAM ERP v2.25.0
 
 **Release:** Attendance overlay UX — in-place month paging, reused across Batch/Students/Timetable

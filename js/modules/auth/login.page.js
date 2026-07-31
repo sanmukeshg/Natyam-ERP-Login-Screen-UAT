@@ -3,9 +3,9 @@
  *
  * Not a router `Page`: it renders before the router (and the Shell it
  * depends on) ever mounts. Three sign-in methods, one screen, matching
- * the approved unified layout: Email & Password (primary), Google, and
- * Mobile OTP — desktop and mobile both, using the same responsive card
- * every other layout on this screen already uses.
+ * the approved landing/login visual design: a hero ("Get Started") state
+ * that reveals a frosted glass sign-in card — Email & Password (primary),
+ * Google, and Mobile OTP — desktop and mobile both.
  *
  * Every method funnels into the same outcome handling: a successful
  * `signIn()`/`confirmMobileCode()` call leaves this screen in its loading
@@ -26,10 +26,15 @@
  * `friendlyAuthError()` below translates the ones this screen can produce
  * into plain, non-technical messages; nothing with a `.code` is ever
  * shown to a person untranslated.
+ *
+ * The hero↔sign-in reveal and "remember me" are purely presentational —
+ * neither touches auth.service.js, Firebase, or session/business logic.
+ * "Remember me" only ever persists the identifier field's text to
+ * localStorage as a same-device convenience, the same way a browser's own
+ * autofill would.
  */
 
 import { html, render, raw, on, formData } from '../../utils/dom.js';
-import { icon } from '../../ui/icons.js';
 import {
     signIn, sendMobileCode, confirmMobileCode, requestPasswordReset
 } from '../../services/auth.service.js';
@@ -45,6 +50,9 @@ const GOOGLE_G_ICON = `
 
 /** Must match mobileOtpProvider.js's RECAPTCHA_CONTAINER_ID exactly. */
 const RECAPTCHA_CONTAINER_ID = 'mobile-otp-recaptcha';
+
+/** Same-device convenience only — never read by auth.service.js or Firebase. */
+const REMEMBER_KEY = 'natyam.rememberedIdentifier';
 
 function errorBanner(message) {
     return html`<div class="alert alert-danger"><p class="alert-body">${message}</p></div>`;
@@ -107,6 +115,65 @@ function friendlyAuthError(err, fallback) {
     }
 }
 
+/** The one real sign-in card — identical DOM for desktop and mobile, only
+ *  repositioned/restyled per breakpoint by auth.css. Rendered exactly once,
+ *  never duplicated, so every id below stays unique in the document. */
+function signInCardMarkup(initialError) {
+    return html`
+        <div class="glass-card">
+            <h1 class="auth-card-title">Welcome back</h1>
+            <p class="auth-card-sub">Sign in to continue to NATYAM ERP.</p>
+
+            <div data-role="banner" aria-live="polite" aria-atomic="true">${initialError ? errorBanner(initialError) : ''}</div>
+
+            <button class="btn btn-google btn-block" type="button" data-role="google-btn">
+                ${raw(GOOGLE_G_ICON)}
+                <span>Continue with Google</span>
+            </button>
+
+            <div class="auth-divider">or sign in with email</div>
+
+            <form data-role="identity-form">
+                <div class="field-fl">
+                    <input class="auth-input" type="text" id="f-identifier" name="email"
+                           placeholder=" " autocomplete="username" required>
+                    <label class="field-fl-label" for="f-identifier">Email or Mobile Number</label>
+                </div>
+                <div class="field-fl" data-role="password-field">
+                    <input class="auth-input" type="password" id="f-password" name="password"
+                           placeholder=" " autocomplete="current-password" required>
+                    <label class="field-fl-label" for="f-password">Password</label>
+                </div>
+                <div class="auth-row-between">
+                    <label class="switch auth-remember">
+                        <input type="checkbox" data-role="remember-toggle">
+                        <span class="switch-track"></span>
+                        Remember me
+                    </label>
+                    <button class="auth-link-g" type="button" data-role="forgot-btn">Forgot password?</button>
+                </div>
+                <button class="btn btn-primary btn-block" type="submit" data-role="primary-btn">
+                    Login
+                </button>
+            </form>
+
+            <div data-role="otp-verify" hidden>
+                <div class="field-fl">
+                    <input class="auth-input" type="text" id="f-otp-code" inputmode="numeric"
+                           placeholder=" " autocomplete="one-time-code">
+                    <label class="field-fl-label" for="f-otp-code">Enter the code you received</label>
+                </div>
+                <button class="btn btn-secondary btn-block" type="button" data-role="verify-otp-btn">
+                    Verify
+                </button>
+                <button class="auth-link-g" type="button" data-role="change-number-btn">Use a different number</button>
+            </div>
+
+            <div id="${RECAPTCHA_CONTAINER_ID}"></div>
+        </div>
+    `;
+}
+
 /**
  * @param {HTMLElement} container
  * @param {object} [options]
@@ -114,6 +181,21 @@ function friendlyAuthError(err, fallback) {
  *   set by app.js when it re-renders this screen after a provisioning failure.
  */
 export function renderLogin(container, { initialError = null } = {}) {
+    // app.js can call this again on the same #app node without ever
+    // unmounting it in between — showLoginScreen() re-invokes renderLogin()
+    // after a provisioning rejection. on()'s listeners are scoped to
+    // `container` itself, not to the DOM nodes render() is about to
+    // replace, so a second call would otherwise stack a second full set of
+    // handlers on top of the first and fire every action twice. Tear down
+    // whatever a previous call wired up first — the same disposal shape
+    // router Page instances use (onDispose()/destroy() in js/core/router.js),
+    // just kept locally since this function isn't a Page and has no `this`
+    // to hang it from.
+    container.__authDisposers?.forEach((dispose) => dispose());
+    const disposers = [];
+    const onScoped = (...args) => disposers.push(on(...args));
+    container.__authDisposers = disposers;
+
     // Holds the Mobile OTP flow's in-progress confirmation handle between
     // "Send OTP" and "Verify" — this screen has exactly one instance at a
     // time, so a plain closure variable is enough; no component state
@@ -128,63 +210,62 @@ export function renderLogin(container, { initialError = null } = {}) {
     // their email address.
     let mode = 'email';
 
+    // A rejection message must never land behind the still-hidden hero —
+    // if there's one, mount straight into the sign-in state so it's seen.
+    let showLogin = Boolean(initialError);
+
     render(container, html`
-        <div class="auth-screen">
-            <div class="auth-card card">
-                <div class="auth-brand">
-                    <span class="brand-mark" aria-hidden="true">${raw(icon('feather', { size: 22 }))}</span>
-                    <span class="brand-text">
-                        <span class="brand-name">NATYAM</span>
-                        <span class="brand-sub">School of Kuchipudi</span>
-                    </span>
+        <div class="auth-screen" data-state="${showLogin ? 'signin' : 'hero'}">
+            <div class="auth-stage">
+
+                <div class="auth-art" aria-hidden="true">
+                    <div class="auth-medallion"></div>
+                    <p class="auth-tagline">Preserving the Legacy of Kuchipudi</p>
                 </div>
 
-                <div class="card-body">
-                    <h1 class="auth-title">Sign in</h1>
-                    <p class="auth-subtitle">Sign in to continue to NATYAM ERP.</p>
-
-                    <div data-role="banner">${initialError ? errorBanner(initialError) : ''}</div>
-
-                    <form data-role="identity-form">
-                        <div class="field">
-                            <label class="field-label" for="f-identifier">Email or Mobile Number</label>
-                            <input class="input" type="text" id="f-identifier" name="email"
-                                   placeholder="you@natyam.example or 98765 43210" autocomplete="username" required>
-                        </div>
-                        <div class="field" data-role="password-field">
-                            <label class="field-label" for="f-password">Password</label>
-                            <input class="input" type="password" id="f-password" name="password"
-                                   placeholder="••••••••" autocomplete="current-password" required>
-                        </div>
-                        <button class="btn btn-primary btn-block" type="submit" data-role="primary-btn">
-                            Login
-                        </button>
-                        <button class="btn-link" type="button" data-role="forgot-btn">Forgot password?</button>
-                    </form>
-
-                    <button class="btn btn-secondary btn-block" type="button" data-role="google-btn">
-                        ${raw(GOOGLE_G_ICON)}
-                        <span>Continue with Google</span>
-                    </button>
-
-                    <div data-role="otp-verify" hidden>
-                        <div class="field">
-                            <label class="field-label" for="f-otp-code">Enter the code you received</label>
-                            <input class="input" type="text" id="f-otp-code" inputmode="numeric"
-                                   placeholder="6-digit code" autocomplete="one-time-code">
-                        </div>
-                        <button class="btn btn-secondary btn-block" type="button" data-role="verify-otp-btn">
-                            Verify
-                        </button>
-                        <button class="btn-link" type="button" data-role="change-number-btn">Use a different number</button>
+                <div class="auth-hero-mobile" data-role="hero-mobile">
+                    <div class="auth-hero-mobile-img" role="img" aria-label="Natyam — School of Kuchipudi"></div>
+                    <div class="auth-tap-wrap">
+                        <div class="auth-tap-shape"></div>
+                        <canvas class="auth-tap-fx" data-role="tap-fx"></canvas>
+                        <span class="auth-tap-label">Get Started</span>
+                        <button class="auth-tap-btn" type="button" data-role="show-login-btn" aria-label="Get Started"></button>
                     </div>
+                </div>
 
-                    <div id="${RECAPTCHA_CONTAINER_ID}"></div>
+                <div class="auth-right">
+                    <div class="auth-rightstage">
+
+                        <div class="auth-hero-desktop" data-role="hero-desktop">
+                            <div class="auth-brand-block">
+                                <div class="auth-wordmark" role="img" aria-label="Natyam — School of Kuchipudi"></div>
+                                <p class="auth-unit-tag">— Unit of SSMDA —</p>
+                            </div>
+                            <span class="auth-shine-wrap">
+                                <canvas class="auth-btn-fx" data-role="cta-fx"></canvas>
+                                <button class="auth-cta-btn" type="button" data-role="show-login-btn">Get Started</button>
+                            </span>
+                        </div>
+
+                        <div class="auth-signin" data-role="signin-panel">
+                            <div class="auth-signin-inner">
+                                <button class="auth-back-link" type="button" data-role="back-link">← Back</button>
+                                ${signInCardMarkup(initialError)}
+                                <p class="auth-mobile-tagline" aria-hidden="true">Preserving the Art of Kuchipudi</p>
+                            </div>
+                        </div>
+
+                    </div>
                 </div>
             </div>
+            <div class="auth-foot"><span>© ${new Date().getFullYear()} Natyam School</span></div>
         </div>
     `);
 
+    const authScreen = container.querySelector('.auth-screen');
+    const heroDesktop = container.querySelector('[data-role="hero-desktop"]');
+    const heroMobile = container.querySelector('[data-role="hero-mobile"]');
+    const signinPanel = container.querySelector('[data-role="signin-panel"]');
     const banner = container.querySelector('[data-role="banner"]');
     const googleButton = container.querySelector('[data-role="google-btn"]');
     const identityForm = container.querySelector('[data-role="identity-form"]');
@@ -195,6 +276,56 @@ export function renderLogin(container, { initialError = null } = {}) {
     const forgotButton = container.querySelector('[data-role="forgot-btn"]');
     const otpVerify = container.querySelector('[data-role="otp-verify"]');
     const verifyOtpButton = container.querySelector('[data-role="verify-otp-btn"]');
+    const rememberToggle = container.querySelector('[data-role="remember-toggle"]');
+
+    /* -------------------------------------------------------- HERO REVEAL */
+
+    /**
+     * `inert` (not `hidden`/`display:none`) pulls the inactive side out of
+     * the tab order AND the accessibility tree — browsers already treat
+     * inert content as hidden from assistive tech, so no separate
+     * `aria-hidden` bookkeeping is needed — without touching `display`, so
+     * auth.css's opacity/transform cross-fade has something to animate; see
+     * the ACCESSIBILITY note at the bottom of auth.css.
+     */
+    function setInert(el, value) {
+        if (!el) return;
+        if (value) el.setAttribute('inert', '');
+        else el.removeAttribute('inert');
+    }
+
+    function applyRevealState() {
+        authScreen.dataset.state = showLogin ? 'signin' : 'hero';
+        setInert(heroDesktop, showLogin);
+        setInert(heroMobile, showLogin);
+        setInert(signinPanel, !showLogin);
+    }
+    applyRevealState();
+
+    onScoped(container, 'click', '[data-role="show-login-btn"]', () => {
+        showLogin = true;
+        applyRevealState();
+        identifierInput.focus();
+    });
+
+    onScoped(container, 'click', '[data-role="back-link"]', () => {
+        showLogin = false;
+        applyRevealState();
+        // Leaving mid-OTP shouldn't strand the screen in the OTP-verify view
+        // next time "Get Started" is clicked — same reset as "Use a different number".
+        if (!otpVerify.hidden) {
+            confirmation = null;
+            otpVerify.hidden = true;
+            identityForm.hidden = false;
+        }
+        // Whichever hero variant the current breakpoint actually renders
+        // (auth.css decides that, not this code) is the one with a real
+        // offsetParent; the other is `display:none`.
+        const desktopBtn = heroDesktop.querySelector('[data-role="show-login-btn"]');
+        const mobileBtn = heroMobile.querySelector('[data-role="show-login-btn"]');
+        const getStartedBtn = desktopBtn?.offsetParent ? desktopBtn : mobileBtn;
+        getStartedBtn?.focus();
+    });
 
     /* --------------------------------------------------------- MODE DETECTION */
 
@@ -220,13 +351,30 @@ export function renderLogin(container, { initialError = null } = {}) {
         primaryButton.textContent = mode === 'mobile' ? 'Send OTP' : 'Login';
     }
 
-    on(container, 'input', '#f-identifier', () => applyMode(detectMode(identifierInput.value)));
+    onScoped(container, 'input', '#f-identifier', () => applyMode(detectMode(identifierInput.value)));
+
+    /* ------------------------------------------------------------ REMEMBER ME */
+
+    const remembered = localStorage.getItem(REMEMBER_KEY);
+    if (remembered) {
+        identifierInput.value = remembered;
+        rememberToggle.checked = true;
+        applyMode(detectMode(remembered));
+    }
+
+    onScoped(container, 'change', '[data-role="remember-toggle"]', () => {
+        if (!rememberToggle.checked) localStorage.removeItem(REMEMBER_KEY);
+    });
 
     /* ------------------------------------------------------ EMAIL & PASSWORD */
 
-    on(container, 'submit', '[data-role="identity-form"]', async (event) => {
+    onScoped(container, 'submit', '[data-role="identity-form"]', async (event) => {
         event.preventDefault();
         render(banner, '');
+
+        if (rememberToggle.checked) localStorage.setItem(REMEMBER_KEY, identifierInput.value.trim());
+        else localStorage.removeItem(REMEMBER_KEY);
+
         primaryButton.setAttribute('data-loading', 'true');
         primaryButton.disabled = true;
 
@@ -258,7 +406,7 @@ export function renderLogin(container, { initialError = null } = {}) {
         }
     });
 
-    on(container, 'click', '[data-role="forgot-btn"]', async () => {
+    onScoped(container, 'click', '[data-role="forgot-btn"]', async () => {
         const email = identifierInput.value.trim();
         if (!email) {
             render(banner, errorBanner('Enter your email above first, then click "Forgot password?" again.'));
@@ -277,7 +425,7 @@ export function renderLogin(container, { initialError = null } = {}) {
 
     /* -------------------------------------------------------------- GOOGLE */
 
-    on(container, 'click', '[data-role="google-btn"]', async () => {
+    onScoped(container, 'click', '[data-role="google-btn"]', async () => {
         render(banner, '');
         googleButton.setAttribute('data-loading', 'true');
         googleButton.disabled = true;
@@ -301,7 +449,7 @@ export function renderLogin(container, { initialError = null } = {}) {
 
     /* ------------------------------------------------------- MOBILE OTP VERIFY */
 
-    on(container, 'click', '[data-role="verify-otp-btn"]', async () => {
+    onScoped(container, 'click', '[data-role="verify-otp-btn"]', async () => {
         render(banner, '');
         const code = container.querySelector('#f-otp-code').value.trim();
         verifyOtpButton.setAttribute('data-loading', 'true');
@@ -318,7 +466,7 @@ export function renderLogin(container, { initialError = null } = {}) {
         }
     });
 
-    on(container, 'click', '[data-role="change-number-btn"]', () => {
+    onScoped(container, 'click', '[data-role="change-number-btn"]', () => {
         render(banner, '');
         confirmation = null;
         otpVerify.hidden = true;
@@ -328,4 +476,140 @@ export function renderLogin(container, { initialError = null } = {}) {
         applyMode('email');
         identifierInput.focus();
     });
+
+    /* ------------------------------------------------------ SPECULAR GLOW FX */
+    attachSpecularGlow(heroDesktop.querySelector('.auth-shine-wrap'), heroDesktop.querySelector('[data-role="cta-fx"]'), { radius: null, autoplayMs: 0 });
+    attachSpecularGlow(heroMobile.querySelector('.auth-tap-wrap'), heroMobile.querySelector('[data-role="tap-fx"]'), { radius: 14, autoplayMs: 4800 });
+}
+
+/**
+ * A soft highlight that hugs a rounded-rect button's edge and steers toward
+ * the pointer, fading in with proximity — drawn on a 2D canvas since this
+ * app has no build step/WebGL pipeline to host a shader version. Purely
+ * decorative; skipped entirely under prefers-reduced-motion so nobody gets a
+ * glow that animates forever with no way to turn it off.
+ *
+ * @param {HTMLElement} wrap positioned ancestor sized to the button + padding
+ * @param {HTMLCanvasElement} canvas the `.auth-*-fx` canvas inside `wrap`
+ * @param {{radius: number|null, autoplayMs: number}} opts `radius` null = pill (min(w,h)/2)
+ */
+function attachSpecularGlow(wrap, canvas, { radius: fixedRadius, autoplayMs }) {
+    if (!wrap || !canvas) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const btn = wrap.querySelector('button');
+    const ctx = canvas.getContext('2d');
+    const PAD = 16;
+    const PROXIMITY = 200;
+    const SPEED = 0.35;
+    let w = 0, h = 0, radius = 0;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    function resize() {
+        const r = btn.getBoundingClientRect();
+        w = r.width; h = r.height;
+        radius = fixedRadius ?? Math.min(w, h) / 2;
+        canvas.width = Math.round((w + PAD * 2) * dpr);
+        canvas.height = Math.round((h + PAD * 2) * dpr);
+        canvas.style.width = `${w + PAD * 2}px`;
+        canvas.style.height = `${h + PAD * 2}px`;
+        canvas.style.left = `${-PAD}px`;
+        canvas.style.top = `${-PAD}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    const resizeObserver = new ResizeObserver(resize);
+    resizeObserver.observe(btn);
+    resize();
+    // Fonts/entrance-animations can settle a frame or two after the first
+    // synchronous layout, which would otherwise leave the canvas sized for a
+    // stale (smaller) button and make the glow ring miss the real edges.
+    requestAnimationFrame(resize);
+    setTimeout(resize, 60);
+    setTimeout(resize, 400);
+    if (document.fonts?.ready) document.fonts.ready.then(resize);
+
+    function roundRectPath(x, y, rw, rh, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + rw, y, x + rw, y + rh, r);
+        ctx.arcTo(x + rw, y + rh, x, y + rh, r);
+        ctx.arcTo(x, y + rh, x, y, r);
+        ctx.arcTo(x, y, x + rw, y, r);
+        ctx.closePath();
+    }
+
+    let angle = 0, idleAngle = 0, bright = 0, proximityT = 0, pointerAngle = null;
+    const autoplayStart = performance.now();
+
+    function pointerFrom(clientX, clientY) {
+        const r = btn.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const dx = Math.max(r.left - clientX, 0, clientX - r.right);
+        const dy = Math.max(r.top - clientY, 0, clientY - r.bottom);
+        const dist = Math.hypot(dx, dy);
+        pointerAngle = Math.atan2(clientY - cy, clientX - cx);
+        const t = Math.max(0, 1 - dist / PROXIMITY);
+        proximityT = t * t * (3 - 2 * t);
+    }
+    const onPointerMove = (e) => pointerFrom(e.clientX, e.clientY);
+    const onTouchStart = (e) => {
+        const t0 = e.touches?.[0];
+        if (!t0) return;
+        pointerFrom(t0.clientX, t0.clientY);
+        proximityT = 0.9;
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    if (autoplayMs > 0) window.addEventListener('touchstart', onTouchStart, { passive: true });
+
+    // renderLogin() can run again over the page's life (app.js re-renders
+    // the whole screen after a provisioning rejection), which orphans this
+    // canvas/button — `container.innerHTML` replaces them, but nothing else
+    // stops this rAF loop or the two window-level listeners above. Once the
+    // canvas is no longer in the document, tear everything down instead of
+    // running forever against detached nodes.
+    let last = performance.now();
+    (function frame(now) {
+        if (!canvas.isConnected) {
+            window.removeEventListener('pointermove', onPointerMove);
+            if (autoplayMs > 0) window.removeEventListener('touchstart', onTouchStart);
+            resizeObserver.disconnect();
+            return;
+        }
+        requestAnimationFrame(frame);
+        const dt = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        idleAngle += SPEED * dt;
+        const target = pointerAngle != null ? pointerAngle : idleAngle;
+        const diff = ((target - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        angle += diff * (1 - Math.exp(-dt * 7));
+
+        let effectiveTarget = proximityT;
+        if (autoplayMs > 0) {
+            const elapsed = now - autoplayStart;
+            const autoplayT = elapsed < autoplayMs ? (1 - elapsed / autoplayMs) : 0;
+            effectiveTarget = Math.max(proximityT, autoplayT);
+        }
+        bright += (effectiveTarget - bright) * (1 - Math.exp(-dt * 8));
+
+        ctx.clearRect(0, 0, w + PAD * 2, h + PAD * 2);
+        if (bright > 0.008) {
+            const cx = PAD + w / 2, cy = PAD + h / 2;
+            const grad = ctx.createConicGradient(angle - Math.PI, cx, cy);
+            grad.addColorStop(0, `rgba(255,255,255,${0.95 * bright})`);
+            grad.addColorStop(0.06, 'rgba(255,255,255,0)');
+            grad.addColorStop(0.44, 'rgba(255,255,255,0)');
+            grad.addColorStop(0.5, `rgba(255,255,255,${0.95 * bright})`);
+            grad.addColorStop(0.56, 'rgba(255,255,255,0)');
+            grad.addColorStop(0.94, 'rgba(255,255,255,0)');
+            grad.addColorStop(1, `rgba(255,255,255,${0.95 * bright})`);
+            ctx.save();
+            ctx.shadowColor = `rgba(240,196,106,${0.85 * bright})`;
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = grad;
+            roundRectPath(PAD, PAD, w, h, radius);
+            ctx.stroke();
+            ctx.restore();
+        }
+    })(last);
 }

@@ -415,40 +415,11 @@
 
 /* ==========================================================================
    BOOT SCREEN
+   Moved to assets/css/auth.css — same front-door brand system (theme-
+   independent) as the landing/login screen it hands off to or is replaced
+   by. See js/app.js's boot()/showLoginScreen()/enterApp() for the
+   `#boot` removal points.
    ========================================================================== */
-
-.boot {
-    position: fixed;
-    inset: 0;
-    z-index: var(--z-boot);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-    background: var(--surface-canvas);
-}
-
-.boot-mark {
-    display: grid;
-    place-items: center;
-    width: 46px; height: 46px;
-    font-family: var(--font-display);
-    font-size: var(--text-xl);
-    font-weight: var(--weight-bold);
-    color: var(--brand-indigo-900);
-    background: var(--brand-gold-500);
-    border-radius: var(--radius-lg);
-    animation: boot-pulse 1.6s var(--ease-standard) infinite;
-}
-@keyframes boot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-
-.boot-text { font-size: var(--text-sm); color: var(--text-secondary); }
-
-.boot-error { max-width: 480px; padding: var(--space-6); text-align: center; }
-.boot-error h1 { font-size: var(--text-lg); color: var(--danger-500); margin-bottom: var(--space-3); }
-.boot-error p { font-size: var(--text-sm); color: var(--text-secondary); margin-bottom: var(--space-3); line-height: var(--leading-normal); }
-.boot-error .type-mono { display: block; padding: var(--space-3); background: var(--surface-sunken); border-radius: var(--radius-md); text-align: left; word-break: break-word; margin-bottom: var(--space-4); }
 
 /* ==========================================================================
    RESPONSIVE

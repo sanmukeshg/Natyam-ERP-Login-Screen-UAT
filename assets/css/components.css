@@ -59,6 +59,19 @@
 .btn-secondary:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); }
 .btn-secondary:active:not(:disabled) { background: var(--surface-active); }
 
+/* Google — branded per Google's sign-in button guidelines: white, neutral text,
+   a bordered outline. Used on the login screen; kept as a real variant here
+   rather than a one-off so any other "Sign in with Google" entry point can
+   reuse it. */
+.btn-google {
+    background: var(--neutral-0);
+    color: var(--neutral-800);
+    border-color: var(--border-default);
+    box-shadow: var(--shadow-xs);
+}
+.btn-google:hover:not(:disabled) { background: var(--neutral-50); border-color: var(--border-strong); }
+.btn-google:active:not(:disabled) { background: var(--neutral-100); }
+
 /* Ghost — toolbars and table row actions, where borders would create noise. */
 .btn-ghost { background: transparent; color: var(--text-secondary); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
