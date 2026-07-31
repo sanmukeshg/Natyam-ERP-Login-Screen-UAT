@@ -1,3 +1,27 @@
+# Release Notes — NATYAM ERP v2.26.2
+
+**Release:** Fix iOS keyboard auto-opening on Get Started tap
+**Date:** 1 August 2026
+**Baseline:** v2.26.1
+**Type:** Bug-fix patch — one mobile UX regression reported on iPhone; no functional or architectural change.
+
+## What changed for the academy
+
+- **Tapping "Get Started" on a phone no longer pops the keyboard open immediately.** The sign-in screen now slides in the way you'd expect from a native app, and the keyboard appears only once you actually tap into the Email or Mobile Number field.
+- **The page no longer sometimes zooms in when the sign-in screen appears.**
+- Continuing with Google is unaffected and still works the moment you tap it.
+
+## For administrators / IT
+
+- Root cause: the app was calling `.focus()` on the email field the instant "Get Started" was tapped, inside the same touch event — which iOS treats as permission to open the keyboard right away, before the screen had even finished sliding in. Fixed by focusing the newly revealed card instead of the field, matching the same focus-management pattern already used everywhere else in the app when navigating between screens. Also increased the sign-in input text size on phones only (13px → 16px) since iOS auto-zooms any focused input below 16px — this was a second, independent contributor to the reported zoom. Desktop is untouched.
+- No Firebase, Firestore, routing, or authentication logic touched.
+
+## Quality
+
+- Verified: tapping "Get Started" no longer focuses any input (confirmed via the browser's own active-element state, not just visually); tapping the Email or Mobile Number field directly still focuses it correctly; desktop's focus and text-size behavior is unchanged; no scroll/viewport jump after either transition; no console errors.
+
+---
+
 # Release Notes — NATYAM ERP v2.26.1
 
 **Release:** Fix desktop layout regressions found in local UAT testing

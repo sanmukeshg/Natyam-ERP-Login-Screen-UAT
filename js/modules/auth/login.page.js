@@ -120,7 +120,7 @@ function friendlyAuthError(err, fallback) {
  *  never duplicated, so every id below stays unique in the document. */
 function signInCardMarkup(initialError) {
     return html`
-        <div class="glass-card">
+        <div class="glass-card" tabindex="-1">
             <h1 class="auth-card-title">Welcome back</h1>
             <p class="auth-card-sub">Sign in to continue to NATYAM ERP.</p>
 
@@ -274,6 +274,7 @@ export function renderLogin(container, { initialError = null } = {}) {
     const otpVerify = container.querySelector('[data-role="otp-verify"]');
     const verifyOtpButton = container.querySelector('[data-role="verify-otp-btn"]');
     const rememberToggle = container.querySelector('[data-role="remember-toggle"]');
+    const glassCard = container.querySelector('.glass-card');
 
     /* -------------------------------------------------------- HERO REVEAL */
 
@@ -302,7 +303,12 @@ export function renderLogin(container, { initialError = null } = {}) {
     onScoped(container, 'click', '[data-role="show-login-btn"]', () => {
         showLogin = true;
         applyRevealState();
-        identifierInput.focus();
+        // Focus the revealed card, not the identifier field — same reasoning
+        // as the router's own route-change focus move (js/core/router.js):
+        // announce the new view to assistive tech without opening a mobile
+        // keyboard or nudging the viewport (preventScroll) for a tap that
+        // only asked to reveal the sign-in screen, not to start typing yet.
+        glassCard.focus({ preventScroll: true });
     });
 
     onScoped(container, 'click', '[data-role="back-link"]', () => {
@@ -321,7 +327,7 @@ export function renderLogin(container, { initialError = null } = {}) {
         const desktopBtn = heroDesktop.querySelector('[data-role="show-login-btn"]');
         const mobileBtn = heroMobile.querySelector('[data-role="show-login-btn"]');
         const getStartedBtn = desktopBtn?.offsetParent ? desktopBtn : mobileBtn;
-        getStartedBtn?.focus();
+        getStartedBtn?.focus({ preventScroll: true });
     });
 
     /* --------------------------------------------------------- MODE DETECTION */

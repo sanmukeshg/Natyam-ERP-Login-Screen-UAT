@@ -295,6 +295,12 @@
 
     .glass-card { margin-top: 0; min-height: 0; max-width: none; padding: var(--space-6) var(--space-5); }
 
+    /* iOS Safari auto-zooms the page on focus for any input under 16px —
+       bumping to --text-md (16px) here, mobile-only, keeps the desktop
+       artifact's own 13px sizing untouched while eliminating that zoom for
+       a genuine tap into the field (not just the auto-focus fixed above). */
+    .field-fl .auth-input { font-size: var(--text-md); }
+
     .auth-mobile-tagline {
         display: block; margin: var(--space-10) 0 0; text-align: center;
         font-family: var(--font-display); font-weight: var(--weight-bold); font-size: var(--text-lg); letter-spacing: .012em;

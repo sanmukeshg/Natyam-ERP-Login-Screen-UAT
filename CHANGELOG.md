@@ -9,6 +9,37 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.2] — 2026-08-01 — Fix iOS keyboard auto-opening on Get Started tap
+
+On iPhone (Safari and installed PWA), tapping "Get Started" opened the
+on-screen keyboard immediately and sometimes zoomed the page, before the
+sign-in card had even finished sliding in.
+
+### Fixed
+- **`identifierInput.focus()` in the `show-login-btn` click handler was
+  firing synchronously inside the tap's own gesture**, which iOS honors as
+  permission to open the keyboard immediately — regardless of whether the
+  reveal transition had finished or the user had asked to type anything yet.
+  Replaced with the same pattern the router already uses on every other page
+  transition (`js/core/router.js`'s `viewport.focus({ preventScroll: true })`
+  on a `tabindex="-1"` container): `.glass-card` now gets `tabindex="-1"` and
+  receives focus instead of the input — announces the new screen to
+  assistive tech, opens no keyboard (it's a `<div>`), and `preventScroll`
+  stops any viewport nudge. The "← Back" button's own focus restore got the
+  same `preventScroll` for consistency.
+- **Sign-in inputs were 13px, under iOS Safari's 16px auto-zoom threshold**
+  — the second contributor to the reported zoom, independent of the
+  auto-focus bug (a genuine future tap into the field would have zoomed the
+  page too). Bumped to `var(--text-md)` (16px), mobile-only — desktop keeps
+  the approved artifact's original 13px sizing.
+- Manually tapping the Mobile/Email field, submitting the OTP request, and
+  "Use a different number" still focus their respective inputs directly and
+  immediately — these are direct results of an explicit user action asking
+  for that specific field, not automatic focus on navigation, and were left
+  unchanged.
+
+---
+
 ## [2.26.1] — 2026-08-01 — Fix desktop layout regressions found in local UAT testing
 
 Two visual bugs reported against v2.26.0's Landing/Login redesign, both traced
