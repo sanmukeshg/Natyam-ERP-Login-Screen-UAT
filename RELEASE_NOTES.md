@@ -1,3 +1,25 @@
+# Release Notes — NATYAM ERP v2.26.3
+
+**Release:** Fix zero padding on the desktop sign-in card
+**Date:** 1 August 2026
+**Baseline:** v2.26.2
+**Type:** Bug-fix patch — one visual regression reported from local testing on desktop; no functional or architectural change.
+
+## What changed for the academy
+
+- **The sign-in card's fields now have proper breathing room** from the card's edges on desktop and tablet, instead of the Google button, the email/password fields, and the Login button rendering flush against the card border.
+
+## For administrators / IT
+
+- Root cause: a typo referencing a spacing value (`--space-7`) that doesn't exist in the app's design-token scale, which silently zeroed out the card's padding entirely rather than just making it smaller. Fixed to use a real token. Audited every other spacing reference in the same stylesheets to confirm this was the only instance.
+- No Firebase, Firestore, routing, or authentication logic touched.
+
+## Quality
+
+- Verified by exact measurement: card padding is now 32px/24px on desktop (was computing to 0px), 24px/20px on mobile (already correct, unaffected by this fix). No console errors.
+
+---
+
 # Release Notes — NATYAM ERP v2.26.2
 
 **Release:** Fix iOS keyboard auto-opening on Get Started tap

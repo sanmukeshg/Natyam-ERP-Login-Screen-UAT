@@ -9,6 +9,28 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.3] — 2026-08-01 — Fix zero padding on the desktop sign-in card
+
+The Google button, divider, both inputs, and the Login button were rendering
+flush against the sign-in card's edges on desktop/tablet (screenshot from
+local testing showed ~1px gaps left/right and the Login button almost
+touching the card's bottom edge).
+
+### Fixed
+- **`.glass-card`'s `padding: var(--space-8) var(--space-7)` referenced
+  `--space-7`, a token that doesn't exist** in `tokens.css`'s space scale
+  (it goes `--space-6` (24px) straight to `--space-8` (32px), by design).
+  An undefined custom property with no fallback makes the whole `padding`
+  shorthand invalid at computed-value time, so the browser dropped it
+  entirely — padding computed to `0px`, not "smaller than intended." Fixed
+  to `var(--space-8) var(--space-6)` (32px/24px), both real tokens. Mobile's
+  own padding override was already using valid tokens and was unaffected.
+- Audited every other `var(--*)` reference in `auth.css` and
+  `components.css` against the token set to confirm no other instance of
+  this same mistake exists.
+
+---
+
 ## [2.26.2] — 2026-08-01 — Fix iOS keyboard auto-opening on Get Started tap
 
 On iPhone (Safari and installed PWA), tapping "Get Started" opened the
