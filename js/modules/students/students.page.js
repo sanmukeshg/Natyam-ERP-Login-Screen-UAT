@@ -28,6 +28,7 @@ import { router } from '../../core/router.js';
 import { formatMoney, formatNumber } from '../../utils/money.js';
 import { formatDate, formatDateLong, relativeTime, localDate } from '../../utils/date.js';
 import { donutChart, legend, chartPalette, kpiCard } from '../../ui/chart.js';
+import { mountStudentMonthReport } from '../../ui/attendance-widgets.js';
 import { STUDENT_STATUS, exposedFeeFrequencies } from '../../config/app.config.js';
 
 import {
@@ -914,7 +915,31 @@ export default class StudentsPage extends Page {
                     </div>
                 </div>
             ` : ''}
+
+            ${/* The same month-paged report used by Batch → Roll → student,
+                  reused here rather than re-built — a second implementation of
+                  the same report is exactly what leads the two to drift apart.
+                  Its own day-by-day list scrolls on its own so this doesn't
+                  turn the whole tab into one long scroll. */''}
+            <div data-role="student-month-attendance"><div class="skeleton skeleton-row"></div></div>
+            ${raw(this.mountStudentMonthWidget(data.student.id))}
         `;
+    }
+
+    /**
+     * The month-paged attendance report is async (a Firestore read) and this
+     * panel is built synchronously, so it mounts the same way household and
+     * history do below: paint a placeholder now, fill it in once the data
+     * arrives. Previous/Next Month afterwards never leaves this slot — see
+     * mountStudentMonthReport() in attendance-widgets.js.
+     */
+    mountStudentMonthWidget(studentId) {
+        queueMicrotask(() => {
+            const slot = document.querySelector('[data-role="student-month-attendance"]');
+            if (!slot) return;
+            mountStudentMonthReport(slot, { studentId, scrollableList: true });
+        });
+        return '';
     }
 
     peoplePanel(data) {

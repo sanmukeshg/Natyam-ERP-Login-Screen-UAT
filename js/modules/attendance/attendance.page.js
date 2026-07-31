@@ -39,21 +39,16 @@ import { formOverlay } from '../../ui/form.js';
 import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { formatNumber } from '../../utils/money.js';
-import { formatDate, formatDateLong, localDate, addDays, monthKey, formatMonth, parseDate } from '../../utils/date.js';
+import { formatDate, formatDateLong, localDate, addDays, monthKey, parseDate } from '../../utils/date.js';
 import { ATTENDANCE_STATUS } from '../../config/app.config.js';
 import { holidays$ } from '../../data/repositories.js';
 
 import {
-    openRegister, dayBoard, postRegister, monthlyGrid, missingRegisters,
-    batchCalendar, MARKING_WINDOW_DAYS, markingWindow
+    openRegister, dayBoard, postRegister, missingRegisters,
+    MARKING_WINDOW_DAYS, markingWindow
 } from '../../services/attendance.service.js';
-import { listBatches } from '../../services/batches.service.js';
 import { postponeSession, cancelSession } from '../../services/session.service.js';
-
-const MARKS = [
-    { value: ATTENDANCE_STATUS.PRESENT, label: 'Present', short: 'P', tone: 'positive' },
-    { value: ATTENDANCE_STATUS.ABSENT, label: 'Absent', short: 'A', tone: 'negative' },
-];
+import { MARKS, openClassCalendar, openAttendanceMonth } from '../../ui/attendance-widgets.js';
 
 export default class AttendancePage extends Page {
     constructor(context) {
@@ -91,10 +86,10 @@ export default class AttendancePage extends Page {
                         <button class="btn btn-secondary btn-icon btn-sm" data-shift="1"
                                 aria-label="Next day">${raw(icon('chevron-right', { size: 15 }))}</button>
                     </div>
-                    <button class="btn btn-secondary btn-sm" data-action="month">
-                        ${raw(icon('calendar', { size: 15 }))} Month view
+                    <button class="btn btn-primary btn-sm" data-action="month">
+                        ${raw(icon('calendar', { size: 15 }))} Attendance - Month
                     </button>
-                    <button class="btn btn-secondary btn-sm" data-action="missing">
+                    <button class="btn btn-primary btn-sm" data-action="missing">
                         ${raw(icon('alert-circle', { size: 15 }))} Missing registers
                     </button>
                 </div>
@@ -115,7 +110,7 @@ export default class AttendancePage extends Page {
             this.batchId ? this.openBatchRegister(this.batchId) : this.loadBoard();
         }));
         this.onDispose(on(this.container, 'click', '[data-action="month"]', () => this.monthView()));
-        this.onDispose(on(this.container, 'click', '[data-action="class-dates"]', () => this.openClassDates()));
+        this.onDispose(on(this.container, 'click', '[data-action="class-calendar"]', () => this.openClassDates()));
         this.onDispose(on(this.container, 'click', '[data-action="missing"]', () => this.openMissingRegisters()));
         this.onDispose(on(this.container, 'click', '[data-open-batch]', (_e, target) =>
             this.openBatchRegister(target.dataset.openBatch)));
@@ -287,20 +282,20 @@ export default class AttendancePage extends Page {
 
         const reg = this.register;
         const inactive = reg.sessionStatus === 'postponed' || reg.sessionStatus === 'cancelled';
-        // Class dates stays available whatever the session's status — it is
+        // Class Calendar stays available whatever the session's status — it is
         // how you get *away* from a cancelled or postponed date to a real
         // one, so hiding it exactly when the date is wrong would be backwards.
         const showPostponeCancel = session.can('student.edit') && !inactive;
 
         render(slot, html`
-            <button class="btn btn-sm btn-secondary" data-action="class-dates">
-                ${raw(icon('calendar', { size: 15 }))} Class dates
+            <button class="btn btn-sm btn-primary" data-action="class-calendar">
+                ${raw(icon('calendar', { size: 15 }))} Class Calendar
             </button>
             ${showPostponeCancel ? html`
-                <button class="btn btn-sm btn-secondary" data-postpone="${reg.batch.id}" data-date="${this.date}">
+                <button class="btn btn-sm btn-primary" data-postpone="${reg.batch.id}" data-date="${this.date}">
                     Postpone
                 </button>
-                <button class="btn btn-sm btn-secondary" data-cancel-session="${reg.batch.id}" data-date="${this.date}">
+                <button class="btn btn-sm btn-primary" data-cancel-session="${reg.batch.id}" data-date="${this.date}">
                     Cancel
                 </button>
             ` : ''}
@@ -316,88 +311,18 @@ export default class AttendancePage extends Page {
      * picker is the better control, and this screen is used one-handed at the
      * edge of a hall. This sits alongside it for the question the native
      * input cannot answer: which of these days did this batch actually meet?
+     *
+     * Shared with Batch → Open Batch's own "Class Calendar" button (see
+     * attendance-widgets.js) — that one opens read-only, this one lets a pick
+     * jump straight into the register, which is the whole reason it lives on
+     * this page.
      */
-    async openClassDates(month = monthKey(parseDate(this.date))) {
-        let calendar;
-        try {
-            calendar = await batchCalendar({ batchId: this.batchId, month });
-        } catch (err) {
-            toast.error(err.message);
-            return;
-        }
-
-        await drawer({
-            title: 'Class dates',
-            description: `${calendar.batch.name} — days this batch met. Pick one to open its register.`,
-            size: 'sm',
-            content: this.calendarView(calendar),
-            actions: [{ label: 'Close', variant: 'secondary', value: null }],
-            onMount: (body, api) => {
-                on(body, 'click', '[data-month-shift]', async (_e, target) => {
-                    const shift = Number(target.dataset.monthShift);
-                    const [y, m] = calendar.month.split('-').map(Number);
-                    const next = monthKey(new Date(y, m - 1 + shift, 1));
-                    api.close(null);
-                    await this.openClassDates(next);
-                });
-                on(body, 'click', '[data-pick-date]', (_e, target) => {
-                    api.close(null);
-                    this.goToRegister(this.batchId, target.dataset.pickDate);
-                });
-            }
+    openClassDates(month = monthKey(parseDate(this.date))) {
+        return openClassCalendar({
+            batchId: this.batchId,
+            month,
+            onPickDate: (date) => this.goToRegister(this.batchId, date)
         });
-    }
-
-    calendarView(calendar) {
-        // Monday-first, matching the timetable and the Indian school week.
-        const lead = (calendar.days[0].weekday + 6) % 7;
-
-        return html`
-            <div class="spread mb-4">
-                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="-1" aria-label="Previous month">
-                    ${raw(icon('chevron-left', { size: 15 }))}
-                </button>
-                <span class="type-strong">${formatMonth(calendar.month)}</span>
-                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="1" aria-label="Next month">
-                    ${raw(icon('chevron-right', { size: 15 }))}
-                </button>
-            </div>
-
-            <div class="calendar-grid">
-                ${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d) => html`
-                    <span class="calendar-heading">${d}</span>
-                `)}
-                ${Array.from({ length: lead }, () => html`<span></span>`)}
-                ${calendar.days.map((day) => {
-                    if (!day.hasClass) {
-                        return html`<span class="calendar-day" data-state="none">${day.dayOfMonth}</span>`;
-                    }
-                    const state = day.status === 'cancelled' ? 'cancelled'
-                        : day.status === 'postponed' ? 'postponed'
-                        : day.marked ? 'marked'
-                        : day.markable ? 'pending' : 'locked';
-                    const title = `${formatDate(day.date)} — ${
-                        state === 'cancelled' ? 'cancelled'
-                        : state === 'postponed' ? 'postponed to another date'
-                        : state === 'marked' ? 'register marked'
-                        : state === 'pending' ? 'not marked yet'
-                        : 'outside the correction window'}`;
-                    return html`
-                        <button class="calendar-day" data-state="${state}" data-pick-date="${day.date}"
-                                title="${title}" aria-label="${title}">
-                            ${day.dayOfMonth}${day.isReplacement ? html`<span class="calendar-dot"></span>` : ''}
-                        </button>`;
-                })}
-            </div>
-
-            <ul class="stack stack-xs mt-4 type-caption type-muted">
-                <li><span class="calendar-key" data-state="marked"></span> Register marked</li>
-                <li><span class="calendar-key" data-state="pending"></span> Class held, not yet marked</li>
-                <li><span class="calendar-key" data-state="cancelled"></span> Cancelled</li>
-                <li><span class="calendar-key" data-state="postponed"></span> Postponed — mark its replacement</li>
-                <li><span class="calendar-key" data-state="none"></span> No class</li>
-            </ul>
-        `;
     }
 
     async postponeSlot(batchId, date) {
@@ -801,110 +726,13 @@ export default class AttendancePage extends Page {
 
     /* ------------------------------------------------------------- MONTH VIEW */
 
-    async monthView() {
-        const batches = await listBatches(session.branch());
-        if (!batches.length) {
-            toast.info('There are no batches to show.');
-            return;
-        }
-
-        let batchId = this.batchId || batches[0].id;
-        let month = monthKey(this.date);
-
-        await drawer({
-            title: 'Month view',
-            description: 'Every meeting day in the month, per student.',
-            size: 'wide',
-            content: html`
-                <div class="filter-bar">
-                    <div class="row row-wrap">
-                        <label class="filter-control">
-                            <span class="sr-only">Batch</span>
-                            <select class="select select-sm" data-role="batch">
-                                ${batches.map((batch) => html`
-                                    <option value="${batch.id}" ${batch.id === batchId ? 'selected' : ''}>
-                                        ${batch.name}
-                                    </option>
-                                `)}
-                            </select>
-                        </label>
-                        <label class="filter-control">
-                            <span class="sr-only">Month</span>
-                            <input class="input input-sm" type="month" value="${month}" data-role="month">
-                        </label>
-                    </div>
-                </div>
-                <div data-role="grid"><p class="type-muted">Loading…</p></div>
-            `,
-            actions: [{ label: 'Close', variant: 'secondary', value: null }],
-            onMount: (body) => {
-                const paint = async () => {
-                    const slot = body.querySelector('[data-role="grid"]');
-                    render(slot, html`<div class="skeleton skeleton-row"></div>`);
-                    try {
-                        const grid = await monthlyGrid({ batchId, month });
-                        render(slot, this.gridView(grid));
-                    } catch (err) {
-                        render(slot, html`<div class="alert alert-danger"><p class="alert-body">${err.message}</p></div>`);
-                    }
-                };
-
-                on(body, 'change', '[data-role="batch"]', (_e, target) => { batchId = target.value; paint(); });
-                on(body, 'change', '[data-role="month"]', (_e, target) => { month = target.value; paint(); });
-                paint();
-            }
-        });
-    }
-
-    gridView(grid) {
-        if (!grid.days.length) {
-            return html`<div class="empty empty-compact">
-                <p class="empty-text">${grid.batch.name} has no meeting days yet in ${formatMonth(grid.month)}.</p>
-            </div>`;
-        }
-
-        return html`
-            <div class="table-wrap">
-                <table class="table table-pin-first table-compact">
-                    <caption class="sr-only">
-                        Attendance for ${grid.batch.name}, ${formatMonth(grid.month)}
-                    </caption>
-                    <thead>
-                        <tr>
-                            <th scope="col">Student</th>
-                            ${grid.days.map((day) => html`
-                                <th scope="col" class="text-center" title="${formatDate(day.date)}">${day.day}</th>
-                            `)}
-                            <th scope="col" class="text-right">Rate</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${grid.rows.map((row) => html`
-                            <tr>
-                                <th scope="row">${row.student.name}</th>
-                                ${row.cells.map((cell) => {
-                                    const meta = MARKS.find((m) => m.value === cell);
-                                    return html`<td class="text-center">
-                                        ${meta
-                                            ? html`<span class="mark-dot" data-tone="${meta.tone}"
-                                                         title="${meta.label}">${meta.short}</span>`
-                                            : html`<span class="type-muted" aria-label="not marked">·</span>`}
-                                    </td>`;
-                                })}
-                                <td class="text-right">
-                                    ${row.rate === null
-                                        ? html`<span class="type-muted">—</span>`
-                                        : html`<span class="badge ${row.rate >= 80 ? 'badge-success'
-                                            : row.rate >= 65 ? 'badge-warning' : 'badge-danger'}">${row.rate}%</span>`}
-                                </td>
-                            </tr>
-                        `)}
-                    </tbody>
-                </table>
-            </div>
-            <p class="type-caption type-muted mt-2">
-                Only days this batch meets appear as columns.
-            </p>
-        `;
+    /**
+     * Shared with Batch → Open Batch's own "Attendance - Month" button (see
+     * attendance-widgets.js) — that one preselects its batch and hides the
+     * picker since the batch is already known; this one shows the picker,
+     * defaulting to whichever batch's register is open, if any.
+     */
+    monthView() {
+        return openAttendanceMonth({ batchId: this.batchId, month: monthKey(this.date) });
     }
 }

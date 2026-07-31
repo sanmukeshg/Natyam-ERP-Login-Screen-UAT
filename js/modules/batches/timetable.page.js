@@ -201,10 +201,6 @@ export default class TimetablePage extends Page {
                                                         ${entry.startTime}–${entry.endTime}
                                                     </span>
                                                     <span class="type-strong">${entry.name}</span>
-                                                    <span class="type-caption type-muted">
-                                                        ${entry.levelLabel} · ${entry.teacherName}
-                                                        ${entry.room ? `· ${entry.room}` : ''}
-                                                    </span>
                                                     ${cancelled ? html`
                                                         <span class="badge badge-danger">${STATUS_LABEL.cancelled}</span>
                                                     ` : pending ? html`

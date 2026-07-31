@@ -9,6 +9,78 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.25.0] — 2026-07-31 — Attendance overlay UX: in-place month paging, reuse across Batch/Students/Timetable
+
+A UX enhancement round from "New Requirements and Observation 2.23.2":
+consolidating three previously-duplicated attendance overlays (a student's
+month, a batch's class calendar, a batch's month grid) into one shared
+module, fixing the Previous/Next Month controls that closed and reopened
+their drawer on every page (read by users as the screen reloading), and
+extending each overlay's reach to two more entry points. No Firestore schema
+or rules change — every fix and addition is application-layer, reusing the
+existing `attendance.service.js` read functions unchanged.
+
+### Fixed
+- **Previous/Next Month closed the whole drawer and reopened a fresh one**,
+  on both the per-student attendance drawer (Batch → Roll → student) and the
+  Class Calendar picker (reached from the Timetable register). Repainting an
+  already-open drawer used to require a full `overlay()` teardown because
+  nothing else repainted a drawer's body in place; both now do, sharing one
+  fix in the new `js/ui/attendance-widgets.js`. The drawer never closes
+  mid-navigation; a short slide plays in the direction paged.
+
+### Added — reused across Batch, Students, and Timetable
+- **Batch → Open Batch now has "Class Calendar" and "Attendance - Month"
+  buttons.** Class Calendar opens read-only (no pick-a-date-to-mark
+  affordance — this is a batch overview, not a way into the register).
+  Attendance - Month opens with its batch preselected and the batch picker
+  hidden, since the batch is already known.
+- **Students → Open Student → Attendance tab now includes the same
+  month-by-month report used on the Batch roll** (attendance percentage,
+  present/absent counts, day-by-day list with Previous/Next Month) below the
+  existing all-time summary, reusing `mountStudentMonthReport()` rather than
+  a second implementation. Its day-by-day list scrolls independently so the
+  tab doesn't become one long page.
+
+### Changed — naming and button styling
+- **"Class dates" renamed to "Class Calendar"; "Month view" renamed to
+  "Attendance - Month"**, consistently across every button label and drawer
+  title (Timetable register, and the two new Batch buttons).
+- **The white/outline toolbar buttons on the Attendance register — Class
+  Calendar, Postpone, Cancel, Attendance - Month, Missing registers — now use
+  the same filled action-button style as the Operations row** (Move batch,
+  Collect fee, Promote, Status, Issue certificate), standardizing on one
+  button treatment for primary page actions. Icon-only prev/next controls and
+  `Close`/`Back` were left as secondary buttons — this was a labeling
+  standardization, not a system-wide button redesign.
+- **The Timetable's weekly tile now shows only the batch name** (plus its
+  time slot) instead of also stacking curriculum levels, teacher, and room
+  onto the card. That detail is unchanged and still one tap away — opening
+  the tile still leads to the same register/batch information as before.
+
+### New reusable module
+- `js/ui/attendance-widgets.js` — `mountStudentMonthReport()`,
+  `openClassCalendar()`, `openAttendanceMonth()` (plus their render
+  functions and the shared `MARKS` constant, previously declared separately
+  in three files). Six call sites across `batches.page.js`,
+  `students.page.js`, and `attendance.page.js` now share these three
+  functions instead of maintaining six copies.
+
+### Quality
+- Verified in-browser: DOM-identity checks confirm the drawer element itself
+  is never removed/recreated across a month-shift (only its content
+  repaints); all five affected workflows exercised (Batch → Student
+  Attendance, Students → Attendance tab, Timetable → register → Class
+  Calendar, Batch → Class Calendar, Batch → Attendance - Month); no console
+  errors on any touched screen; dark mode and 375px mobile width checked for
+  layout overflow.
+- Not verified: the two new Batch-page buttons and the Students-tab widget
+  against a very large roster (100+ students) for the day-by-day list's
+  independent-scroll behaviour — tested against the ~23-37 student UAT
+  batches only.
+
+---
+
 ## [2.24.0] — 2026-07-30 — Erase, Attendance session-awareness, self-service profile
 
 Five phases from a UAT observation document ("New Requirements and Observation

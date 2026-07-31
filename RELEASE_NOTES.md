@@ -1,3 +1,31 @@
+# Release Notes — NATYAM ERP v2.25.0
+
+**Release:** Attendance overlay UX — in-place month paging, reused across Batch/Students/Timetable
+**Date:** 31 July 2026
+**Baseline:** v2.24.0
+**Type:** UX enhancement round — approved observations from "New Requirements and Observation 2.23.2", reviewed and implemented in place; no new architecture, no Firestore schema or rules change.
+
+## What changed for the academy
+
+- **Paging between months no longer closes the screen you were looking at.** The per-student attendance drawer (opened from a batch's roll) and the Class Calendar picker (opened from a register) used to close and reopen every time you clicked Previous or Next Month — which looked like the screen reloading. Both now stay open and simply update in place, with a short slide in the direction you paged.
+- **Batch pages now have their own "Class Calendar" and "Attendance - Month" buttons**, so you no longer need to go through the register to see which days a batch met, or its whole-batch monthly attendance grid. Class Calendar here is view-only; Attendance - Month already knows which batch you're looking at, so it skips straight to picking a month.
+- **A student's own page now shows their month-by-month attendance** — the same report you'd see from a batch's roll (percentage, present/absent, day-by-day, Previous/Next Month) — right on their Attendance tab, not just a lifetime summary.
+- **"Class dates" is now called "Class Calendar", and "Month view" is now called "Attendance - Month"**, everywhere those buttons and drawers appear.
+- **The main toolbar buttons on the Attendance register now match the look of the Operations buttons** elsewhere in the app (Move batch, Collect fee, etc.) instead of standing out as plain white buttons.
+- **Timetable tiles are simpler** — just the batch name and its time, not also the curriculum levels, teacher, and room crowded onto one card. Opening a tile still shows everything it always did.
+
+## For administrators / IT
+
+- **No `firestore.rules` change, no schema change, no migration.** Every change in this release reads the same attendance data the same way as before; only how and where it's displayed changed.
+- Three previously-separate implementations of these attendance overlays were consolidated into one shared module (`js/ui/attendance-widgets.js`) as part of adding the new Batch-page buttons and Students-tab widget — this is an internal code-organization change with no visible effect beyond fixing the month-paging behaviour described above.
+- Not verified against a very large batch roster (100+ students) — tested against this UAT dataset's batches (23–37 students each).
+
+## Quality
+
+- Verified in-browser: confirmed (via DOM inspection, not just visual) that the drawer element itself is never torn down and rebuilt during month navigation — only its contents repaint. All five affected workflows exercised end to end. No console errors on any touched screen. Dark mode and 375px mobile width both checked for layout overflow.
+
+---
+
 # Release Notes — NATYAM ERP v2.24.0
 
 **Release:** Erase, Attendance session-awareness, self-service profile

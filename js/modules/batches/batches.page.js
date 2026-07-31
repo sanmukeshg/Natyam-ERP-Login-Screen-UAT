@@ -25,8 +25,8 @@ import { session } from '../../core/session.js';
 import { EVENTS } from '../../core/bus.js';
 import { router } from '../../core/router.js';
 import { formatNumber } from '../../utils/money.js';
-import { localDate, monthKey, formatMonth, formatDate } from '../../utils/date.js';
-import { LEVELS, levelsOf, ATTENDANCE_STATUS } from '../../config/app.config.js';
+import { localDate, monthKey, formatMonth } from '../../utils/date.js';
+import { LEVELS, levelsOf } from '../../config/app.config.js';
 
 import {
     WEEK, listBatches, batchDetail, createBatch, updateBatch, closeBatch, reopenBatch
@@ -34,6 +34,7 @@ import {
 import { studentMonth } from '../../services/attendance.service.js';
 import { availableTeachers } from '../../services/staff.service.js';
 import { listBranches } from '../../services/settings.service.js';
+import { mountStudentMonthReport, openClassCalendar, openAttendanceMonth } from '../../ui/attendance-widgets.js';
 
 // Keys must match the WEEK values exported by batches.service (capitalised),
 // otherwise every lookup misses and the label silently falls back to the raw
@@ -383,6 +384,18 @@ export default class BatchesPage extends Page {
                     ${kpiCard('Room', batch.room || 'Not set')}
                 </div>
 
+                <div class="profile-ops">
+                    <span class="profile-ops-label">Attendance</span>
+                    <div class="profile-ops-row">
+                        <button class="btn btn-sm btn-primary" data-action="class-calendar">
+                            ${raw(icon('calendar', { size: 15 }))} Class Calendar
+                        </button>
+                        <button class="btn btn-sm btn-primary" data-action="attendance-month">
+                            ${raw(icon('calendar', { size: 15 }))} Attendance - Month
+                        </button>
+                    </div>
+                </div>
+
                 <div class="card"><div class="card-body">
                     ${summaryList([
                         ['Code', batch.code],
@@ -440,6 +453,10 @@ export default class BatchesPage extends Page {
                 // involved: this is a report, not a roll call.
                 on(body, 'click', '[data-student]', (_e, target) =>
                     this.openStudentAttendance(target.dataset.student));
+                on(body, 'click', '[data-action="class-calendar"]', () =>
+                    openClassCalendar({ batchId: batch.id, readOnly: true }));
+                on(body, 'click', '[data-action="attendance-month"]', () =>
+                    openAttendanceMonth({ batchId: batch.id, showBatchPicker: false }));
             }
         });
     }
@@ -453,134 +470,44 @@ export default class BatchesPage extends Page {
      * amount of clicking around in here can land somebody on a roll call they
      * did not mean to open — the marking screen is reached from the Timetable
      * and nowhere else.
+     *
+     * The drawer opens once and stays open: Previous/Next Month used to close
+     * it and open a fresh one for every month paged through, which reads as
+     * the whole panel reloading. mountStudentMonthReport() instead repaints
+     * only the report inside, in place — shared with the same widget on the
+     * Students module's own Attendance tab (see students.page.js).
      */
     async openStudentAttendance(studentId, startMonth = monthKey()) {
-        let month = startMonth;
-
-        // A loop, not recursion: paging back through a year of months would
-        // otherwise leave a year's worth of nested awaits suspended, each
-        // holding its own drawer's closure alive for no reason.
-        for (;;) {
-            let report;
-            try {
-                report = await studentMonth({ studentId, month });
-            } catch (err) {
-                toast.error(err.message);
-                return;
-            }
-
-            const result = await drawer({
-                title: report.student.name,
-                description: report.batch
-                    ? `${report.batch.name} · attendance for ${formatMonth(report.month)}`
-                    : `Not in a batch · attendance for ${formatMonth(report.month)}`,
-                size: 'sm',
-                content: this.studentAttendanceView(report),
-                actions: [{ label: 'Close', variant: 'secondary', value: null }],
-                onMount: (body, api) => {
-                    on(body, 'click', '[data-month-shift]', (_e, target) => {
-                        const [y, m] = report.month.split('-').map(Number);
-                        api.close({ month: monthKey(new Date(y, m - 1 + Number(target.dataset.monthShift), 1)) });
-                    });
-                }
-            });
-
-            if (!result?.month) return;
-            month = result.month;
+        let report;
+        try {
+            report = await studentMonth({ studentId, month: startMonth });
+        } catch (err) {
+            toast.error(err.message);
+            return;
         }
-    }
 
-    studentAttendanceView(report) {
-        const thisMonth = monthKey();
-        const marks = report.days.filter((d) => d.mark);
+        const describe = (r) => r.batch
+            ? `${r.batch.name} · attendance for ${formatMonth(r.month)}`
+            : `Not in a batch · attendance for ${formatMonth(r.month)}`;
 
-        return html`
-            <div class="spread mb-4">
-                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="-1" aria-label="Previous month">
-                    ${raw(icon('chevron-left', { size: 15 }))}
-                </button>
-                <span class="type-strong">${formatMonth(report.month)}</span>
-                <button class="btn btn-sm btn-secondary btn-icon" data-month-shift="1"
-                        aria-label="Next month" ${report.month >= thisMonth ? 'disabled' : ''}>
-                    ${raw(icon('chevron-right', { size: 15 }))}
-                </button>
-            </div>
-
-            ${/* Three figures, not three cards. `grid-3` collapses to one
-                  column inside a drawer on a phone, which stacked these to
-                  roughly 340px of chrome before the day-by-day list — a lot
-                  of scrolling to reach the thing the drawer is for. This row
-                  stays three-across at every width because the values are
-                  short enough to. */''}
-            <div class="card"><div class="card-body">
-                <div class="stat-row">
-                    <div class="stat">
-                        <span class="stat-value">${report.rate === null ? '—' : `${report.rate}%`}</span>
-                        <span class="stat-label">Attendance</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-value">${formatNumber(report.present)}</span>
-                        <span class="stat-label">Present</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-value">${formatNumber(report.absent)}</span>
-                        <span class="stat-label">Absent</span>
-                    </div>
-                </div>
-                <p class="type-caption type-muted text-center">
-                    ${marks.length
-                        ? `${marks.length} class${marks.length === 1 ? '' : 'es'} recorded this month`
-                        : 'Nothing recorded this month'}
-                </p>
-            </div></div>
-
-            ${report.unmarked ? html`
-                <div class="alert alert-warning">
-                    <p class="alert-body">
-                        ${formatNumber(report.unmarked)} class${report.unmarked === 1 ? '' : 'es'} this month
-                        ${report.unmarked === 1 ? 'has' : 'have'} no register yet, so ${report.unmarked === 1 ? 'it is' : 'they are'}
-                        not counted above.
-                    </p>
-                </div>
-            ` : ''}
-
-            <div class="card">
-                <div class="card-header"><h3 class="card-title">Day by day</h3></div>
-                <div class="card-body card-body-tight">
-                    ${report.days.length ? html`
-                        <ul class="stack stack-sm">
-                            ${report.days.map((day) => html`
-                                <li class="spread">
-                                    <div>
-                                        <span class="type-strong">${formatDate(day.date, { withYear: false })}</span>
-                                        ${day.isReplacement ? html`
-                                            <span class="badge badge-warning badge-sm">Rescheduled</span>
-                                        ` : ''}
-                                    </div>
-                                    ${this.dayMark(day)}
-                                </li>
-                            `)}
-                        </ul>
-                    ` : html`
-                        <div class="empty empty-compact">
-                            <p class="empty-text">
-                                ${report.batch
-                                    ? 'This batch held no classes this month.'
-                                    : 'This student is not in a batch, so there is no schedule to report against.'}
-                            </p>
-                        </div>
-                    `}
-                </div>
-            </div>
-        `;
-    }
-
-    dayMark(day) {
-        if (day.status === 'cancelled') return html`<span class="type-caption type-muted">Cancelled</span>`;
-        if (day.status === 'postponed') return html`<span class="type-caption type-muted">Postponed</span>`;
-        if (day.mark === ATTENDANCE_STATUS.PRESENT) return html`<span class="badge badge-success">Present</span>`;
-        if (day.mark === ATTENDANCE_STATUS.ABSENT) return html`<span class="badge badge-danger">Absent</span>`;
-        return html`<span class="type-caption type-muted">Not marked</span>`;
+        await drawer({
+            title: report.student.name,
+            description: describe(report),
+            size: 'sm',
+            content: '',
+            actions: [{ label: 'Close', variant: 'secondary', value: null }],
+            onMount: (body) => {
+                mountStudentMonthReport(body, {
+                    studentId,
+                    month: report.month,
+                    initialReport: report,
+                    onReport: (r) => {
+                        const descEl = body.closest('.drawer')?.querySelector('.modal-description');
+                        if (descEl) descEl.textContent = describe(r);
+                    }
+                });
+            }
+        });
     }
 
     detailActions(batch) {

@@ -820,6 +820,15 @@ tr:focus-within .row-actions { opacity: 1; }
     .drawer { inset: auto 0 0 0; width: 100%; height: 92vh; border-left: none; border-top: 1px solid var(--border-subtle); border-radius: var(--radius-xl) var(--radius-xl) 0 0; animation: sheet-in var(--duration-normal) var(--ease-entrance); }
 }
 
+/* Paging a month inside an already-open drawer (student attendance, class
+   calendar) repaints this wrapper rather than closing and reopening the
+   drawer — see js/ui/attendance-widgets.js. The slide is cosmetic only: a
+   plain repaint with no `data-dir` is equally correct. */
+.month-nav-slide[data-dir="prev"] { animation: month-nav-in-from-left var(--duration-normal) var(--ease-entrance); }
+.month-nav-slide[data-dir="next"] { animation: month-nav-in-from-right var(--duration-normal) var(--ease-entrance); }
+@keyframes month-nav-in-from-left { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes month-nav-in-from-right { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+
 /* ==========================================================================
    TOAST
    ========================================================================== */
