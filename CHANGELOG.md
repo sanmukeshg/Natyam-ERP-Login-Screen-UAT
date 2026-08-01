@@ -9,6 +9,23 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.5] — 2026-08-01 — Desktop sign-in card now scales with the viewport
+
+### Fixed
+- **The desktop/tablet sign-in card was a fixed `1360x660px` box**, sized
+  the same regardless of how large the browser window was. Looked fine on a
+  typical laptop, but on a genuinely large/wide monitor it left a large,
+  clearly-unfilled margin of plain backdrop around it — no fixed pixel
+  value would have avoided this past some screen size. Replaced with a
+  responsive size: `width: min(94vw, 1600px)` (scales with the viewport,
+  capped at 1600px so it doesn't become absurd on an ultrawide) and
+  `min-height: clamp(660px, 90vh, 840px)` (scales with viewport height, but
+  never drops below the original 660px floor — `.auth-stage` clips
+  overflow, so on a short window the sign-in card's content needs that
+  floor to avoid being cut off).
+
+---
+
 ## [2.26.4] — 2026-08-01 — Fix mobile scroll, back-link alignment, and hero background seam
 
 A round of fixes from continued local UAT testing on the mobile and desktop

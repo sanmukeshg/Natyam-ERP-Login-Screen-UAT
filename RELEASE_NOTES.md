@@ -1,3 +1,25 @@
+# Release Notes — NATYAM ERP v2.26.5
+
+**Release:** Desktop sign-in card now scales with the viewport
+**Date:** 1 August 2026
+**Baseline:** v2.26.4
+**Type:** Bug-fix patch — one layout regression found on a large monitor during UAT testing; no functional or architectural change.
+
+## What changed for the academy
+
+- **On a large monitor, the sign-in screen now fills noticeably more of the browser window** instead of appearing as a small, fixed-size card surrounded by a lot of empty space. It scales up to fill more of the screen on bigger displays, while still respecting sensible limits so it never looks stretched or oversized.
+
+## For administrators / IT
+
+- Root cause: the card's size was hard-coded at a fixed 1360x660 pixels regardless of screen size — reasonable on a typical laptop, but any fixed size eventually looks too small once the screen is wide/tall enough. Replaced with a size that scales with the browser window, capped at both ends so it stays well-proportioned from a small desktop window up through a large monitor.
+- No Firebase, Firestore, routing, or authentication logic touched.
+
+## Quality
+
+- Verified by exact measurement at three window sizes: 1920x1080 (card grew from 1360x660 to 1600x840), 1440x900 typical laptop (essentially unchanged in width, taller), and a deliberately short 1024x620 window to confirm the sign-in form never gets cut off at the small end (it didn't — 75px of clearance remained). No console errors; CSS coverage check clean.
+
+---
+
 # Release Notes — NATYAM ERP v2.26.4
 
 **Release:** Fix mobile scroll, back-link alignment, and hero background seam

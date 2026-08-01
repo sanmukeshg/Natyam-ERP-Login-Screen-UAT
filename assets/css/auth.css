@@ -37,7 +37,14 @@
 @media (min-width: 901px) {
     .auth-stage {
         display: grid; grid-template-columns: 1fr 1fr;
-        width: 100%; max-width: 1360px; min-height: 660px;
+        /* Scales with the viewport instead of sitting at a fixed 1360x660 —
+           that fixed size looked fine on a laptop but left a large, clearly
+           unfilled margin of plain backdrop on a big monitor. width grows up
+           to 1600px; min-height grows up to 840px but never drops below the
+           original 660px floor (clamp's lower bound), so short/narrow
+           desktop windows still always have enough room for the sign-in
+           card's content — .auth-stage clips overflow, so that floor matters. */
+        width: min(94vw, 1600px); min-height: clamp(660px, 90vh, 840px);
         border-radius: var(--radius-xl);
         overflow: hidden;
         box-shadow: var(--shadow-lg);
