@@ -1,3 +1,28 @@
+# Release Notes — NATYAM ERP v2.26.4
+
+**Release:** Fix mobile scroll, back-link alignment, and hero background seam
+**Date:** 1 August 2026
+**Baseline:** v2.26.3
+**Type:** Bug-fix patch — four visual/layout regressions found in continued local UAT testing; no functional or architectural change.
+
+## What changed for the academy
+
+- **The mobile landing page now stays fixed to one screen instead of scrolling** past its actual content — there was nearly a full screen's worth of unnecessary blank space below the dancer image that made the page scrollable when it shouldn't have been.
+- **The desktop sign-in card is now properly centered** on the page instead of sitting at the top with a large mismatched blank area below it.
+- **The "← Back" link on desktop now sits directly above the sign-in card**, aligned with its edges, instead of floating off to the side disconnected from it — and sits a little lower, closer to the card, per your feedback.
+- **The small color mismatch below the dancer image on some phone screens is gone** — that strip now blends into the image's own natural fade instead of showing as a different, flat brown block.
+
+## For administrators / IT
+
+- Root cause of the two biggest issues (card not centered, page scrolling on mobile): a comment in the stylesheet contained a stray character sequence that CSS interprets as "end of comment," closing it seven lines early. Everything intended as explanatory text after that point was instead treated as broken code, and the browser silently discarded the next real style rule as a result — which happened to be the one controlling the whole screen's background and minimum height. Confirmed this wasn't a browser caching issue by testing in multiple fresh browser tabs and by counting the stylesheet's comment markers directly. A second, unrelated leftover style rule was independently reserving a full extra screen's height of blank space on phones; removed since nothing needed it.
+- No Firebase, Firestore, routing, or authentication logic touched.
+
+## Quality
+
+- Verified by exact measurement in fresh browser sessions (not just visual inspection, to rule out any caching artifacts): page scroll height now matches viewport height exactly on both mobile (was ~2x) and desktop (card is now centered with equal top/bottom spacing, was flush-top with all extra space below); the back link's left/right edges now match the card's exactly, on both breakpoints; the background color below the mobile hero image now matches the image's own edge tone (sampled directly from the image's pixel data, not eyeballed). No console errors; CSS coverage check clean.
+
+---
+
 # Release Notes — NATYAM ERP v2.26.3
 
 **Release:** Fix zero padding on the desktop sign-in card

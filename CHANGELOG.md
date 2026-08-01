@@ -9,6 +9,51 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [2.26.4] — 2026-08-01 — Fix mobile scroll, back-link alignment, and hero background seam
+
+A round of fixes from continued local UAT testing on the mobile and desktop
+landing/login screens.
+
+### Fixed
+- **A malformed doc-comment in `auth.css` silently deleted `.auth-screen`'s
+  entire base rule** (`position`, `min-height: 100vh/dvh`, `background`,
+  `color`, `font-family`). The comment read `--surface-*/--text-*/--accent`,
+  and `*/` is CSS's comment-close sequence — so the comment actually ended
+  seven lines early, mid-sentence, and the browser's parser error-recovery
+  swallowed the very next rule as collateral damage. Confirmed via
+  `document.styleSheets` inspection across multiple fresh tabs (not a
+  caching artifact) and by counting comment open/close markers (`auth.css`
+  had 15 opens but 17 closes). This is what made the desktop card render
+  flush at the top of the viewport with a large mismatched blank area below
+  it instead of being centered, and silently dropped the mobile background
+  color too. The identical phrase had been copy-pasted into a comment in
+  `modules.css`, harmless there since nothing follows it, but fixed too.
+- **`.auth-right { min-height: 100dvh }` on mobile reserved a full extra
+  viewport of blank space** below the hero image for no reason — its only
+  meaningful child, `.auth-signin`, is `position: fixed` and never relied on
+  its parent's height. This is what made the mobile landing page scroll
+  instead of staying fixed to one screen.
+- **The "← Back" link floated away from the sign-in card** instead of
+  sitting above it. Side effect of the v2.26.1 fix that gave
+  `.auth-signin-inner` an explicit `width: 100%` — the card centers itself
+  within that (now much wider) container via `margin: auto`, but the back
+  link had no matching constraint and stayed flush against the container's
+  far-left edge. Fixed by giving `.auth-back-link` the same
+  `max-width: 400px` + centering as `.glass-card`, so they always share the
+  same left/right edges; nudged down slightly per UAT feedback.
+- **A flat-color seam below the mobile hero image on taller viewports.**
+  `intro-mobile.jpg` is intentionally locked to its own true aspect ratio
+  (not stretched/cropped) so `.auth-tap-wrap`'s percentage-based tap-zone
+  coordinates stay pixel-accurate against the baked-in button. On a viewport
+  taller than the image renders at, the leftover sliver showed
+  `.auth-screen`'s flat `--brand-terracotta-800` fallback, which didn't
+  match the image's own near-black bottom-edge fade. Fixed by sampling the
+  image's actual bottom-edge color (`#140907`, read directly from decoded
+  pixel data via canvas) and using it as the mobile fallback background, so
+  any gap blends seamlessly regardless of device aspect ratio.
+
+---
+
 ## [2.26.3] — 2026-08-01 — Fix zero padding on the desktop sign-in card
 
 The Google button, divider, both inputs, and the Login button were rendering

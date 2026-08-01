@@ -793,6 +793,6 @@ button.calendar-day:hover { border-color: var(--border-strong); }
 /* ==========================================================================
    LOGIN SCREEN
    Moved to assets/css/auth.css — this screen is deliberately theme-
-   independent (never reads --surface-*/--text-*/--accent) and large enough
-   (~300+ lines) to warrant its own file rather than living in this one.
+   independent (never reads --surface-, --text- or --accent tokens) and large
+   enough (~300+ lines) to warrant its own file rather than living in this one.
    ========================================================================== */

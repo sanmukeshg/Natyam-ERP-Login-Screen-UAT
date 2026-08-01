@@ -4,8 +4,8 @@
    js/modules/auth/login.page.js.
 
    This is the one screen in the app that is deliberately theme-independent:
-   it never reads --surface-*/--text-*/--accent/etc, only the raw brand ramps
-   and the front-door-only --logo-* tokens declared in tokens.css. That keeps
+   it never reads --surface-, --text- or --accent tokens, only the raw brand
+   ramps and the front-door-only --logo- tokens declared in tokens.css. That keeps
    it visually identical regardless of the user's light/dark preference, by
    construction rather than by override — see tokens.css's FRONT DOOR ONLY
    comment. Everything here is scoped under .auth-screen so it can never leak
@@ -191,7 +191,13 @@
 
 .auth-back-link {
     background: none; border: none; color: rgba(255, 255, 255, .6); font-size: var(--text-sm);
-    margin-bottom: var(--space-4); padding: 0; display: flex; align-items: center; gap: var(--space-2);
+    /* Matches .glass-card's own width/max-width/centering exactly (including
+       its mobile max-width:none override below) so the two always share the
+       same left edge — .auth-signin-inner spans the full column, wider than
+       the card, and without this the back link floated to its far-left edge
+       instead of sitting above the card it belongs to. */
+    width: 100%; max-width: 400px; margin: var(--space-6) auto var(--space-4);
+    padding: 0; display: flex; align-items: center; gap: var(--space-2);
     cursor: pointer;
 }
 .auth-back-link:hover { color: #fff; }
@@ -267,8 +273,22 @@
    tagline/logo/dancer are already drawn in) and a full-bleed login screen.
    ========================================================================== */
 @media (max-width: 900px) {
-    .auth-screen { padding: 0; }
-    .auth-right { padding: 0; min-height: 100dvh; }
+    /* intro-mobile.jpg is locked to its own true aspect ratio (780/1599) so
+       .auth-tap-wrap's percentage coordinates stay pixel-accurate against the
+       baked-in button — it's deliberately never stretched/cropped to fill an
+       arbitrary viewport height. On a viewport taller than the image renders
+       at, that leaves a sliver of .auth-screen's own background showing below
+       it; #140907 is sampled directly from the image's own bottom edge so
+       that sliver blends in instead of showing as a mismatched flat color.
+       The sign-in state's own background-image (login-mobile-bg.jpg) covers
+       the full screen height with no aspect-ratio lock, so it never gaps. */
+    .auth-screen { padding: 0; background-color: #140907; }
+    /* No min-height here: .auth-signin (its only meaningful child) is
+       position:fixed on mobile, so it doesn't need — and never did rely on —
+       .auth-right's own box height. A stale min-height:100dvh previously
+       reserved a full extra viewport of blank space below the hero image,
+       which is what made the page scroll past its actual content. */
+    .auth-right { padding: 0; }
     .auth-rightstage { flex: none; }
 
     .auth-hero-desktop { display: none; }
